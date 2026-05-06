@@ -601,7 +601,8 @@ function AdminAttView({year,month,att,shifts,cfg,sv}){
   const verify=key=>sv.att({...att,[key]:{...att[key],verified:true,verifiedAt:new Date().toISOString()}});
   const saveEdit=()=>{
     if(!ed)return;
-    sv.att({...att,[ed.key]:{...att[ed.key],start:ed.s,end:ed.e,breakMin:ed.b,verified:false}});
+    const existing=att[ed.key]||{staff:ed.newStaff||"",submittedAt:new Date().toISOString()};
+    sv.att({...att,[ed.key]:{...existing,start:ed.s,end:ed.e,breakMin:ed.b,verified:false}});
     setEd(null);
   };
   return <div>
@@ -629,7 +630,7 @@ function AdminAttView({year,month,att,shifts,cfg,sv}){
               <td style={{...TD,fontWeight:600}}>{rec?.staff||<span style={{color:C.muted,fontWeight:400}}>未入力</span>}</td>
               <td style={{...TD,color:C.muted}}>{rec?`${rec.start}〜${rec.end} 休憩${rec.breakMin??60}分（実働${h}h)`:"−"}</td>
               <td style={{...TD,textAlign:"center"}}>
-                {!rec&&<span style={{color:C.amber,fontSize:12,fontWeight:600}}>未入力</span>}
+                {!rec&&<button onClick={e=>{e.stopPropagation();setEd({key,s:"09:00",e:"16:00",b:60,newStaff:sched});}} style={{...Btn(C.amber),fontSize:11,padding:"4px 8px"}}>入力</button>}
                 {rec&&!rec.verified&&<div style={{display:"flex",gap:4,justifyContent:"center",flexWrap:"wrap"}}>
                   <button onClick={e=>{e.stopPropagation();setEd({key,s:rec.start,e:rec.end,b:rec.breakMin??60});}} style={{...Btn(C.blue),fontSize:11,padding:"4px 8px"}}>修正</button>
                   <button onClick={e=>{e.stopPropagation();verify(key);}} style={{...Btn(C.purple),fontSize:11,padding:"4px 8px"}}>承認</button>
