@@ -960,10 +960,11 @@ function AccountingView({year,month,att,shifts,vconf,cfg}){
 function OfficeView(P){
   const [tab,setTab]=useState("calc");
   const tabs=[
-    {id:"calc",  label:"💴 コンシェル"},
-    {id:"mc",    label:"🎤 司会・記録"},
-    {id:"study", label:"📚 勉強会"},
-    {id:"shift", label:"📅 シフト"},
+    {id:"calc",    label:"💴 コンシェル"},
+    {id:"attend",  label:"📋 出勤一覧"},
+    {id:"mc",      label:"🎤 司会・記録"},
+    {id:"study",   label:"📚 勉強会"},
+    {id:"shift",   label:"📅 シフト"},
   ];
   return <div>
     <div style={{...GC,background:`linear-gradient(135deg,${C.office},#0c4a6e)`,color:"#fff",padding:"16px 20px"}}>
@@ -972,10 +973,11 @@ function OfficeView(P){
     </div>
     <MonthSel {...P}/>
     <Tabs tabs={tabs} active={tab} onChange={setTab}/>
-    {tab==="calc" &&<AccountingView {...P}/>}
-    {tab==="mc"   &&<MCAccountingView {...P}/>}
-    {tab==="study"&&<StudySessionView {...P}/>}
-    {tab==="shift"&&<PublicShift {...P} uname=""/>}
+    {tab==="calc"   &&<AccountingView {...P}/>}
+    {tab==="attend" &&<AttendanceSummaryView {...P}/>}
+    {tab==="mc"     &&<MCAccountingView {...P}/>}
+    {tab==="study"  &&<StudySessionView {...P}/>}
+    {tab==="shift"  &&<PublicShift {...P} uname=""/>}
   </div>;
 }
 
@@ -1610,6 +1612,167 @@ const DEFAULT_MC_BILLING = {
     "パントリー":   { "2日葬":0, "1日葬":0, "通夜のみ":0 },
   },
 };
+
+// ═══════════════════════════════════════════════════════════════
+// 出勤一覧（スタッフ別・会場別）
+// ═══════════════════════════════════════════════════════════════
+function AttendanceSummaryView({year,month,att,shifts,vconf,cfg}){
+  const {staff,venues}=cfg;
+  const days=getDays(year,month);
+  const [view,setView]=useState("staff"); // "staff" or "venue"
+  const [selected,setSelected]=useState(null);
+
+  const actualVenue=(d,vName)=>{
+    if(vconf&&vconf[d]&&vconf[d][vName]) return vconf[d][vName];
+    return vName;
+  };
+
+  // スタッフ別データ
+  const staffData=staff.map(name=>{
+    const records=[];
+    for(let d=1;d<=days;d++) for(const v of venues){
+      if(shifts[d]?.[v.name]===name){
+        const key=`${d}-${v.name}`,rec=att[key];
+        const aVenue=actualVenue(d,v.name);
+        const h=rec?parseHours(rec.start,rec.end,rec.breakMin??60):DEFAULT_HOURS;
+        const ot=Math.max(0,Math.round((h-OVERTIME_HOURS)*100)/100);
+        records.push({
+          d,venue:aVenue,
+          start:rec?.start||"09:00",end:rec?.end||"16:00",
+          break:rec?.breakMin??60,hours:h,ot,
+          verified:!!rec?.verified,input:!!rec
+        });
+      }
+    }
+    const totalH=Math.round(records.reduce((a,r)=>a+r.hours,0)*100)/100;
+    return {name,records,totalH};
+  }).filter(r=>r.records.length>0);
+
+  // 会場別データ
+  const venueData={};
+  for(let d=1;d<=days;d++) for(const v of venues){
+    const sn=shifts[d]?.[v.name];if(!sn)continue;
+    const aVenue=actualVenue(d,v.name);
+    const key=`${d}-${v.name}`,rec=att[key];
+    const h=rec?parseHours(rec.start,rec.end,rec.breakMin??60):DEFAULT_HOURS;
+    if(!venueData[aVenue]) venueData[aVenue]=[];
+    venueData[aVenue].push({d,staff:sn,start:rec?.start||"09:00",end:rec?.end||"16:00",hours:h,verified:!!rec?.verified,input:!!rec});
+  }
+
+  const allVenues=Object.keys(venueData).sort();
+
+  return <div>
+    {/* 切替タブ */}
+    <div style={{display:"flex",gap:8,padding:"0 4px 14px"}}>
+      {[["staff","👤 スタッフ別"],["venue","🏛️ 会場別"]].map(([v,l])=>(
+        <button key={v} onClick={()=>{setView(v);setSelected(null);}}
+          style={{...Btn(view===v?C.navy:"#fff"),color:view===v?"#fff":C.muted,
+            border:`1px solid ${view===v?C.navy:C.border}`,fontSize:13,padding:"8px 20px"}}>
+          {l}
+        </button>
+      ))}
+    </div>
+
+    {/* スタッフ別 */}
+    {view==="staff" && <div>
+      {staffData.map(({name,records,totalH})=>(
+        <div key={name} style={GC}>
+          <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",
+            marginBottom:10,cursor:"pointer"}} onClick={()=>setSelected(selected===name?null:name)}>
+            <div>
+              <span style={{fontWeight:800,fontSize:15}}>{name}</span>
+              <span style={{color:C.muted,fontSize:13,marginLeft:10}}>{records.length}日勤務　合計 {totalH}h</span>
+            </div>
+            <span style={{color:C.muted,fontSize:18}}>{selected===name?"▲":"▼"}</span>
+          </div>
+          {selected===name&&(
+            <table style={{width:"100%",borderCollapse:"collapse"}}>
+              <thead><tr style={{background:"#f8f9fb"}}>
+                <th style={TH}>日付</th><th style={TH}>曜</th><th style={TH}>会場</th>
+                <th style={TH}>時間</th><th style={TH}>実働</th><th style={TH}>残業</th><th style={TH}>状態</th>
+              </tr></thead>
+              <tbody>
+                {records.map(r=>{
+                  const wdi=getWdayI(year,month,r.d);
+                  return <tr key={r.d+r.venue} style={{background:r.ot>0?"#fff5f5":"#fff"}}>
+                    <td style={{...TD,fontWeight:700,whiteSpace:"nowrap"}}>{month}/{r.d}</td>
+                    <td style={{...TD,textAlign:"center",color:wdi===0?C.sun:wdi===6?C.sat:C.muted}}>{getWday(year,month,r.d)}</td>
+                    <td style={{...TD,fontWeight:600}}>{r.venue}</td>
+                    <td style={{...TD,color:C.muted,fontSize:12,whiteSpace:"nowrap"}}>{r.start}〜{r.end}<br/>休憩{r.break}分</td>
+                    <td style={{...TD,textAlign:"center",fontWeight:700}}>{r.hours}h</td>
+                    <td style={{...TD,textAlign:"center",color:r.ot>0?C.red:C.muted,fontWeight:r.ot>0?700:400}}>
+                      {r.ot>0?`${r.ot}h`:"－"}
+                    </td>
+                    <td style={{...TD,textAlign:"center",fontSize:12}}>
+                      {r.verified?"✅":r.input?"⏳未承認":"📝未入力"}
+                    </td>
+                  </tr>;
+                })}
+              </tbody>
+            </table>
+          )}
+          {selected!==name&&(
+            <div style={{display:"flex",flexWrap:"wrap",gap:6}}>
+              {records.map(r=>(
+                <span key={r.d+r.venue} style={{
+                  background:r.ot>0?"#fee2e2":r.verified?"#dcfce7":"#f0f9ff",
+                  color:r.ot>0?C.red:r.verified?C.green:C.blue,
+                  borderRadius:8,padding:"4px 10px",fontSize:12,fontWeight:600}}>
+                  {month}/{r.d} {r.venue} {r.start}〜{r.end}
+                </span>
+              ))}
+            </div>
+          )}
+        </div>
+      ))}
+      {staffData.length===0&&<div style={{...GC,textAlign:"center",color:C.muted}}>勤務記録がありません</div>}
+    </div>}
+
+    {/* 会場別 */}
+    {view==="venue" && <div>
+      {/* 会場ボタン */}
+      <div style={{display:"flex",flexWrap:"wrap",gap:8,marginBottom:14,padding:"0 4px"}}>
+        {allVenues.map(v=>(
+          <button key={v} onClick={()=>setSelected(selected===v?null:v)}
+            style={{...Btn(selected===v?C.navy:"#fff"),color:selected===v?"#fff":C.text,
+              border:`1px solid ${selected===v?C.navy:C.border}`,fontSize:13,padding:"8px 16px"}}>
+            {v}
+          </button>
+        ))}
+      </div>
+      {selected&&venueData[selected]&&(
+        <div style={GC}>
+          <h3 style={{margin:"0 0 14px",fontSize:15}}>🏛️ {selected}　{month}月の出勤記録</h3>
+          <table style={{width:"100%",borderCollapse:"collapse"}}>
+            <thead><tr style={{background:"#f8f9fb"}}>
+              <th style={TH}>日付</th><th style={TH}>曜</th><th style={TH}>スタッフ</th>
+              <th style={TH}>時間</th><th style={TH}>実働</th><th style={TH}>状態</th>
+            </tr></thead>
+            <tbody>
+              {venueData[selected].sort((a,b)=>a.d-b.d).map(r=>{
+                const wdi=getWdayI(year,month,r.d);
+                return <tr key={r.d} style={{background:!r.input?"#fffbeb":"#fff"}}>
+                  <td style={{...TD,fontWeight:700,whiteSpace:"nowrap"}}>{month}/{r.d}</td>
+                  <td style={{...TD,textAlign:"center",color:wdi===0?C.sun:wdi===6?C.sat:C.muted}}>{getWday(year,month,r.d)}</td>
+                  <td style={{...TD,fontWeight:700}}>{r.staff}</td>
+                  <td style={{...TD,color:C.muted,fontSize:12,whiteSpace:"nowrap"}}>{r.start}〜{r.end}</td>
+                  <td style={{...TD,textAlign:"center",fontWeight:700}}>{r.hours}h</td>
+                  <td style={{...TD,textAlign:"center",fontSize:12}}>
+                    {r.verified?"✅":r.input?"⏳":"📝未入力"}
+                  </td>
+                </tr>;
+              })}
+            </tbody>
+          </table>
+          <div style={{marginTop:12,textAlign:"right",color:C.muted,fontSize:12}}>
+            合計 {venueData[selected].length}日 / {Math.round(venueData[selected].reduce((a,r)=>a+r.hours,0)*100)/100}h
+          </div>
+        </div>
+      )}
+      {!selected&&<div style={{...GC,textAlign:"center",color:C.muted,padding:30}}>上の会場名をタップすると詳細が表示されます</div>}
+    </div>}
+  </div>;
+}
 
 // ═══════════════════════════════════════════════════════════════
 // 勉強会管理
