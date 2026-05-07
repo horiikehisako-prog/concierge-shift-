@@ -594,13 +594,17 @@ function AdminShiftView({year,month,shifts,prefs,cfg,sv,generate}){
   </div>;
 }
 
-function AdminAttView({year,month,att,shifts,cfg,sv}){
+function AdminAttView({year,month,att,shifts,vconf,cfg,sv}){
   const {venues}=cfg,days=getDays(year,month);
   const [ed,setEd]=useState(null);
+  const actualVenue=(d,vName)=>{
+    if(vconf&&vconf[d]&&vconf[d][vName]) return vconf[d][vName];
+    return vName;
+  };
   const rows=[];
   for(let d=1;d<=days;d++) for(const v of venues){
     const key=`${d}-${v.name}`,rec=att[key],sched=shifts[d]?.[v.name]||"";
-    if(rec||sched)rows.push({d,venue:v.name,sched,rec,key});
+    if(rec||sched)rows.push({d,venue:actualVenue(d,v.name),venueKey:v.name,sched,rec,key});
   }
   const verify=key=>sv.att({...att,[key]:{...att[key],verified:true,verifiedAt:new Date().toISOString()}});
   const saveEdit=()=>{
@@ -1403,7 +1407,7 @@ function MCStaffRecord({ year, month, uname, role, cfg, flash }) {
   const jobRole = role==="mc"?"司会":"アシスタント";
   const today = new Date();
   const [form, setForm] = useState({
-    company:"", venue:"", type:"2日葬", assistRole:"アシスタント",
+    company:"", venue:"", type:"2日葬", assistRole:"アシスタント", training:false,
     date:`${year}-${p2(month)}-${p2(today.getDate())}`,
   });
   const [saving, setSaving] = useState(false);
@@ -1412,7 +1416,10 @@ function MCStaffRecord({ year, month, uname, role, cfg, flash }) {
 
   const rates = cfg.mcRates || {};
   const actualRole = jobRole==="アシスタント" ? form.assistRole : jobRole;
-  const myRate = rates[uname]?.[form.company]?.[actualRole] || 0;
+  const trainingKey = form.training ? "研修" : null;
+  const myRate = trainingKey
+    ? (rates[uname]?.[form.company]?.["研修"] || 0)
+    : (rates[uname]?.[form.company]?.[actualRole] || 0);
 
   const reset = () => { setForm({company:"",venue:"",type:"2日葬",assistRole:"アシスタント",date:`${year}-${p2(month)}-${p2(today.getDate())}`}); };
 
@@ -1424,6 +1431,7 @@ function MCStaffRecord({ year, month, uname, role, cfg, flash }) {
       company: form.company, venue: form.venue,
       type: (actualRole==="パントリー"||actualRole==="アシスタント")?"－":form.type,
       date: form.date.replace(/-/g,"/"),
+      training: form.training,
       createdAt: new Date().toISOString(),
     };
     await stSave(storageKey, [...existing, newRec]);
@@ -1481,6 +1489,24 @@ function MCStaffRecord({ year, month, uname, role, cfg, flash }) {
         </div>
       )}
 
+      {/* 研修トグル（あしべの杜のみ） */}
+      {form.venue && form.company==="あしべの杜" && (
+        <div style={{marginBottom:16}}>
+          <button onClick={()=>setForm({...form,training:!form.training})}
+            style={{width:"100%",border:`2px solid ${form.training?"#f59e0b":C.border}`,
+              borderRadius:12,padding:"12px 16px",cursor:"pointer",fontSize:14,fontWeight:700,
+              background:form.training?"#fffbeb":"#fff",
+              color:form.training?"#92400e":C.muted,
+              display:"flex",alignItems:"center",justifyContent:"space-between"}}>
+            <span>🎓 研修中として記録する</span>
+            <span style={{fontSize:18}}>{form.training?"✅":"⬜"}</span>
+          </button>
+          {form.training&&<div style={{fontSize:12,color:"#92400e",marginTop:6,padding:"0 4px"}}>
+            研修単価が適用されます（管理者設定で変更可）
+          </div>}
+        </div>
+      )}
+
       {/* STEP 3: アシスタント/パントリー選択 */}
       {form.venue && jobRole==="アシスタント" && (
         <div style={{marginBottom:16}}>
@@ -1527,7 +1553,8 @@ function MCStaffRecord({ year, month, uname, role, cfg, flash }) {
             ["会場",form.venue],
             ["役割",actualRole],
             ...(jobRole==="司会"?[["種別",form.type]]:[]),
-            ...(myRate>0?[["支払い単価",yen(myRate)]]:[[" ","（単価は管理者が設定します）"]]),
+            ...(form.training?[["研修","🎓 研修単価適用"]]:
+               myRate>0?[["支払い単価",yen(myRate)]]:[[" ","（単価は管理者が設定します）"]]),
           ].map(([k,v])=>(
             <div key={k} style={{display:"flex",gap:8,marginBottom:4}}>
               <span style={{fontSize:12,color:C.muted,minWidth:64}}>{k}</span>
@@ -2194,7 +2221,8 @@ function MCAccountingView({ year, month, cfg }) {
     const recs = allRecords.filter(r=>r.staff===name);
     let pay = 0;
     recs.forEach(r => {
-      const rate = rates[name]?.[r.company]?.[r.role] || 0;
+      const rateKey = r.training ? "研修" : r.role;
+      const rate = rates[name]?.[r.company]?.[rateKey] || 0;
       pay += rate;
     });
     return { name, count:recs.length, pay, recs };
@@ -2409,27 +2437,33 @@ function MCConfigTab({ cfg, sv }) {
       {/* スタッフ個人単価 */}
       <div style={GC}>
         <h3 style={{margin:"0 0 14px",fontSize:14,color:C.navy}}>👤 スタッフへの支払い単価（1回あたり）</h3>
+        <p style={{fontSize:12,color:C.muted,marginBottom:12}}>🎓「研修」列はあしべの杜の研修期間中の単価です</p>
         <div style={{overflowX:"auto"}}>
           <table style={{width:"100%",borderCollapse:"collapse",minWidth:500}}>
             <thead><tr style={{background:"#f8f9fb"}}>
-              <th style={TH}>スタッフ</th>
+              <th style={{...TH,fontSize:11}}>スタッフ</th>
               {Object.keys(MC_COMPANIES).flatMap(c=>
-                MC_ROLES.map(r=><th key={`${c}-${r}`} style={{...TH,fontSize:10}}>{c}<br/>{r}</th>)
+                [...MC_ROLES,...(c==="あしべの杜"?["研修"]:[])].map(r=>(
+                  <th key={`${c}-${r}`} style={{...TH,fontSize:10,color:r==="研修"?"#92400e":undefined}}>
+                    {c==="飛鳥会館"?"飛鳥":"あしべ"}<br/>{r}
+                  </th>
+                ))
               )}
             </tr></thead>
             <tbody>
               {staff.map(name=>(
                 <tr key={name}>
-                  <td style={{...TD,fontWeight:700,whiteSpace:"nowrap"}}>{name}</td>
+                  <td style={{...TD,fontWeight:700,whiteSpace:"nowrap",fontSize:12}}>{name}</td>
                   {Object.keys(MC_COMPANIES).flatMap(company=>
-                    MC_ROLES.map(role=>(
+                    [...MC_ROLES,...(company==="あしべの杜"?["研修"]:[])].map(role=>(
                       <td key={`${company}-${role}`} style={TD}>
                         <input type="number"
                           value={rates[name]?.[company]?.[role]||""}
                           onChange={e=>setRate(name,company,role,e.target.value)}
                           placeholder="0"
-                          style={{width:"100%",minWidth:60,border:`1px solid ${C.border}`,
-                            borderRadius:6,padding:"4px 6px",fontSize:12,boxSizing:"border-box"}}/>
+                          style={{width:"100%",minWidth:55,border:`1px solid ${role==="研修"?"#f59e0b":C.border}`,
+                            borderRadius:6,padding:"4px 6px",fontSize:12,boxSizing:"border-box",
+                            background:role==="研修"?"#fffbeb":"#fff"}}/>
                       </td>
                     ))
                   )}
