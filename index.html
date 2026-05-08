@@ -598,7 +598,7 @@ function AdminAttView({year,month,att,shifts,vconf,cfg,sv}){
   const {venues}=cfg,days=getDays(year,month);
   const [ed,setEd]=useState(null);
   const actualVenue=(d,vName)=>{
-    if(vconf&&vconf[d]&&vconf[d][vName]) return vconf[d][vName];
+    if(vconf&&vconf[d]){if(typeof vconf[d]==="string") return vconf[d];if(vconf[d][vName]) return vconf[d][vName];}
     return vName;
   };
   const rows=[];
@@ -805,7 +805,7 @@ function AccountingView({year,month,att,shifts,vconf,cfg}){
   const days=getDays(year,month);
 
   const actualVenue=(d,vName)=>{
-    if(vconf&&vconf[d]&&vconf[d][vName]) return vconf[d][vName];
+    if(vconf&&vconf[d]){if(typeof vconf[d]==="string") return vconf[d];if(vconf[d][vName]) return vconf[d][vName];}
     return vName;
   };
 
@@ -1666,7 +1666,7 @@ function AttendanceSummaryView({year,month,att,shifts,vconf,cfg}){
   const [selected,setSelected]=useState(null);
 
   const actualVenue=(d,vName)=>{
-    if(vconf&&vconf[d]&&vconf[d][vName]) return vconf[d][vName];
+    if(vconf&&vconf[d]){if(typeof vconf[d]==="string") return vconf[d];if(vconf[d][vName]) return vconf[d][vName];}
     return vName;
   };
 
@@ -1825,7 +1825,7 @@ function PrintableSheet({year,month,shifts,att,vconf,cfg}){
   const days=getDays(year,month);
 
   const actualVenue=(d,vName)=>{
-    if(vconf&&vconf[d]&&vconf[d][vName]) return vconf[d][vName];
+    if(vconf&&vconf[d]){if(typeof vconf[d]==="string") return vconf[d];if(vconf[d][vName]) return vconf[d][vName];}
     if(vName==="多or蔵") return "蔵王・多治米";
     return vName;
   };
