@@ -1689,8 +1689,8 @@ function AttendanceSummaryView({year,month,att,shifts,vconf,cfg}){
     const aVenue=actualVenue(d,v.name);
     const key=`${d}-${v.name}`,rec=att[key];
     const h=rec?parseHours(rec.start,rec.end,rec.breakMin??60):DEFAULT_HOURS;
-    if(!venueData[aVenue]) venueData[aVenue]=[];
-    venueData[aVenue].push({d,staff:sn,start:rec?.start||"09:00",end:rec?.end||"16:00",hours:h,verified:!!rec?.verified,input:!!rec});
+    const billingVenue=normalizeBillingVenue(aVenue);if(!venueData[billingVenue]) venueData[billingVenue]=[];
+    venueData[billingVenue].push({d,staff:sn,start:rec?.start||"09:00",end:rec?.end||"16:00",hours:h,verified:!!rec?.verified,input:!!rec});
   }
 
   const allVenues=Object.keys(venueData).sort();
