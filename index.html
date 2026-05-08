@@ -792,11 +792,15 @@ function AdminConfig({cfg,sv}){
 // ACCOUNTING VIEW（事務・管理者共通）
 // ═══════════════════════════════════════════════════════════════
 function normalizeBillingVenue(venueName) {
-  if (venueName === "多" || venueName === "多治米") return "小さな多治米";
-  if (venueName === "蔵" || venueName === "蔵王") return "小さな蔵王";
-  if (venueName === "春日" || venueName === "春日斎場") return "春日";
+  if (venueName === "小さな多治米") return "小さな多治米";
+  if (venueName === "小さな蔵王") return "小さな蔵王";
+  if (venueName === "花園") return "花園";
+  if (venueName === "多治米") return "多治米";
+  if (venueName === "春日") return "春日";
+  if (venueName === "多or蔵") return "多or蔵（未振り分け）";
   return venueName;
-}function AccountingView({year,month,att,shifts,vconf,cfg}){
+}
+function AccountingView({year,month,att,shifts,vconf,cfg}){
   const {staff,venues,staffRates={}}=cfg;
   const days=getDays(year,month);
 
