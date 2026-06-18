@@ -1,4 +1,4 @@
- 　<!DOCTYPE html>
+<!DOCTYPE html>
 <html lang="ja">
 <head>
 <meta charset="UTF-8">
@@ -594,26 +594,51 @@ function AdminShiftView({year,month,shifts,prefs,cfg,sv,generate}){
   </div>;
 }
 
-function AdminAttView({year,month,att,shifts,vconf,cfg,sv}){
+function AdminAttView({year,month,att:attProp,shifts,vconf,cfg,sv}){
   const {venues}=cfg,days=getDays(year,month);
+  const [localAtt,setLocalAtt]=useState(attProp);
+  useEffect(()=>{setLocalAtt(attProp);},[attProp]);
+  const att=localAtt;
   const [ed,setEd]=useState(null);
+  const [venueFilter,setVenueFilter]=useState("all");
   const actualVenue=(d,vName)=>{
-    if(vconf&&vconf[d]){if(typeof vconf[d]==="string") return vconf[d];if(vconf[d][vName]) return vconf[d][vName];}
+    const isFlexVenue = cfg.venues.find(v=>v.name===vName)?.options?.length>0;
+    if(isFlexVenue && vconf&&vconf[d]){
+      if(typeof vconf[d]==="string") return vconf[d];
+      if(vconf[d][vName]) return vconf[d][vName];
+    }
     return vName;
   };
-  const rows=[];
+  const allRows=[];
   for(let d=1;d<=days;d++) for(const v of venues){
     const key=`${d}-${v.name}`,rec=att[key],sched=shifts[d]?.[v.name]||"";
-    if(rec||sched)rows.push({d,venue:actualVenue(d,v.name),venueKey:v.name,sched,rec,key});
+    if(rec||sched)allRows.push({d,venue:actualVenue(d,v.name),venueKey:v.name,sched,rec,key});
   }
+  const rows=venueFilter==="all"?allRows:allRows.filter(r=>r.venueKey===venueFilter);
   const verify=key=>sv.att({...att,[key]:{...att[key],verified:true,verifiedAt:new Date().toISOString()}});
   const saveEdit=()=>{
     if(!ed)return;
     const existing=att[ed.key]||{staff:ed.newStaff||"",submittedAt:new Date().toISOString()};
-    sv.att({...att,[ed.key]:{...existing,start:ed.s,end:ed.e,breakMin:ed.b,verified:false}});
+    const newAtt={...att,[ed.key]:{...existing,start:ed.s,end:ed.e,breakMin:ed.b,venue:ed.venue||existing.venue,verified:false}};
+    setLocalAtt(newAtt);
+    sv.att(newAtt);
     setEd(null);
   };
   return <div>
+    <div style={{display:"flex",gap:8,marginBottom:12,flexWrap:"wrap"}}>
+      <button onClick={()=>setVenueFilter("all")}
+        style={{...Btn(venueFilter==="all"?C.navy:"#fff"),color:venueFilter==="all"?"#fff":C.muted,
+          border:`1px solid ${venueFilter==="all"?C.navy:C.border}`,fontSize:13,padding:"7px 16px"}}>
+        全会場
+      </button>
+      {venues.map(v=>(
+        <button key={v.name} onClick={()=>setVenueFilter(v.name)}
+          style={{...Btn(venueFilter===v.name?C.navy:"#fff"),color:venueFilter===v.name?"#fff":C.muted,
+            border:`1px solid ${venueFilter===v.name?C.navy:C.border}`,fontSize:13,padding:"7px 16px"}}>
+          {v.name}
+        </button>
+      ))}
+    </div>
     <div style={{...GC,display:"flex",gap:20}}>
       {[["入力済",rows.filter(r=>r.rec).length,C.blue],["承認済",rows.filter(r=>r.rec?.verified).length,C.green],
         ["未入力",rows.filter(r=>!r.rec&&r.sched).length,C.amber]].map(([l,v,c])=>(
@@ -631,20 +656,20 @@ function AdminAttView({year,month,att,shifts,vconf,cfg,sv}){
           const isEd=ed?.key===key;
           return <React.Fragment key={key}>
             <tr style={{background:rec?.verified?"#f0fdf4":"#fff",cursor:rec?"pointer":"default"}}
-              onClick={()=>rec&&!isEd&&setEd({key,s:rec.start,e:rec.end,b:rec.breakMin??60})}>
+              onClick={()=>rec&&!isEd&&setEd({key,s:rec.start,e:rec.end,b:rec.breakMin??60,venue:venue})}>
               <td style={{...TD,textAlign:"center",fontWeight:700}}>{month}/{d}</td>
               <td style={{...TD,textAlign:"center",fontWeight:700,color:wdi===0?C.sun:wdi===6?C.sat:C.muted}}>{getWday(year,month,d)}</td>
               <td style={TD}>{venue}</td><td style={TD}>{sched||"-"}</td>
               <td style={{...TD,fontWeight:600}}>{rec?.staff||<span style={{color:C.muted,fontWeight:400}}>未入力</span>}</td>
               <td style={{...TD,color:C.muted}}>{rec?`${rec.start}〜${rec.end} 休憩${rec.breakMin??60}分（実働${h}h)`:"−"}</td>
               <td style={{...TD,textAlign:"center"}}>
-                {!rec&&<button onClick={e=>{e.stopPropagation();setEd({key,s:"09:00",e:"16:00",b:60,newStaff:sched});}} style={{...Btn(C.amber),fontSize:11,padding:"4px 8px"}}>入力</button>}
+                {!rec&&<button onClick={e=>{e.stopPropagation();setEd({key,s:"09:00",e:"16:00",b:60,newStaff:sched,venue:venue});}} style={{...Btn(C.amber),fontSize:11,padding:"4px 8px"}}>入力</button>}
                 {rec&&!rec.verified&&<div style={{display:"flex",gap:4,justifyContent:"center",flexWrap:"wrap"}}>
-                  <button onClick={e=>{e.stopPropagation();setEd({key,s:rec.start,e:rec.end,b:rec.breakMin??60});}} style={{...Btn(C.blue),fontSize:11,padding:"4px 8px"}}>修正</button>
+                  <button onClick={e=>{e.stopPropagation();setEd({key,s:rec.start,e:rec.end,b:rec.breakMin??60,venue:venue});}} style={{...Btn(C.blue),fontSize:11,padding:"4px 8px"}}>修正</button>
                   <button onClick={e=>{e.stopPropagation();verify(key);}} style={{...Btn(C.purple),fontSize:11,padding:"4px 8px"}}>承認</button>
                 </div>}
                 {rec?.verified&&<div style={{display:"flex",gap:4,justifyContent:"center",flexWrap:"wrap"}}>
-                  <button onClick={e=>{e.stopPropagation();setEd({key,s:rec.start,e:rec.end,b:rec.breakMin??60});}} style={{...Btn(C.muted),fontSize:11,padding:"4px 8px"}}>修正</button>
+                  <button onClick={e=>{e.stopPropagation();setEd({key,s:rec.start,e:rec.end,b:rec.breakMin??60,venue:venue});}} style={{...Btn(C.muted),fontSize:11,padding:"4px 8px"}}>修正</button>
                   <span style={{color:C.green,fontSize:12,fontWeight:700}}>✅</span>
                 </div>}
               </td>
@@ -652,7 +677,14 @@ function AdminAttView({year,month,att,shifts,vconf,cfg,sv}){
             {isEd&&<tr><td colSpan={7} style={{padding:"12px 16px",background:"#f0f7ff",borderBottom:`2px solid ${C.blue}`}}>
               <div style={{display:"flex",gap:8,alignItems:"center",flexWrap:"wrap"}}>
                 <span style={{fontSize:12,fontWeight:700,color:C.blue}}>✏️ 編集中</span>
-                <label style={{fontSize:12}}>開始</label>
+                <label style={{fontSize:12}}>会場</label>
+<select value={ed.venue||venue} onChange={e=>{const v=e.target.value;setEd(prev=>({...prev,venue:v}));}}
+  style={{border:`1px solid ${C.border}`,borderRadius:6,padding:"4px 8px",fontSize:13}}>
+  {cfg.venues.flatMap(v=>v.options&&v.options.length>0?v.options.map(o=>({name:o})):[v]).map(v=>(
+    <option key={v.name} value={v.name}>{v.name}</option>
+  ))}
+</select>
+<label style={{fontSize:12}}>開始</label>
                 <input type="time" value={ed.s} onChange={e=>setEd({...ed,s:e.target.value})}
                   style={{border:`1px solid ${C.border}`,borderRadius:6,padding:"4px 8px",fontSize:13}}/>
                 <label style={{fontSize:12}}>終了</label>
@@ -796,7 +828,7 @@ function normalizeBillingVenue(venueName) {
   if (venueName === "小さな蔵王") return "小さな蔵王";
   if (venueName === "花園") return "花園";
   if (venueName === "多治米") return "多治米";
-  if (venueName === "春日") return "春日";
+  if (venueName === "春日" || venueName === "春日斎場") return "春日";
   if (venueName === "多or蔵") return "多or蔵（未振り分け）";
   return venueName;
 }
@@ -805,7 +837,8 @@ function AccountingView({year,month,att,shifts,vconf,cfg}){
   const days=getDays(year,month);
 
   const actualVenue=(d,vName)=>{
-    if(vconf&&vconf[d]){if(typeof vconf[d]==="string") return vconf[d];if(vconf[d][vName]) return vconf[d][vName];}
+    const isFlexVenue=cfg.venues.find(v=>v.name===vName)?.options?.length>0;
+    if(isFlexVenue&&vconf&&vconf[d]){if(typeof vconf[d]==="string") return vconf[d];if(vconf[d][vName]) return vconf[d][vName];}
     return vName;
   };
 
@@ -1097,6 +1130,7 @@ function StaffWish({year,month,prefs,sv,uname}){
         </div>
         <div style={{fontSize:12,color:C.muted}}>
           希望日（{myDays.length}日）:&nbsp;
+  
           {myDays.length===0?"なし":myDays.sort((a,b)=>a-b).map(d=>`${d}日(${getWday(year,month,d)})`).join("・")}
         </div>
       </>
@@ -1106,6 +1140,8 @@ function StaffWish({year,month,prefs,sv,uname}){
 
 // ─── 全体シフト（コンシェルジュ・ディレクター・事務 共通）─────────────
 function PublicShift({year,month,shifts,vconf,cfg,uname=""}){
+  const printShift=()=>window.print();
+
   const days=getDays(year,month);
   const {venues}=cfg;
   const today=new Date();
@@ -1113,7 +1149,12 @@ function PublicShift({year,month,shifts,vconf,cfg,uname=""}){
   const isTM=year===today.getFullYear()&&month===today.getMonth()+1;
 
   return <div>
-    <div style={{...GC,padding:"10px 16px",fontSize:12,color:C.muted,display:"flex",gap:16,flexWrap:"wrap"}}>
+ 
+    
+    <div style={{marginBottom:8}}>
+  <button onClick={printShift} style={{...Btn(C.navy),fontSize:13,padding:"8px 18px"}}>🖨️ 印刷する</button>
+</div>
+<div style={{...GC,padding:"10px 16px",fontSize:12,color:C.muted,display:"flex",gap:16,flexWrap:"wrap"}}>
       <span>🟢 自分のシフト</span><span>📍 会場確定済</span><span>⏳ 前日確定待ち</span>
     </div>
     <div style={{...GC,overflowX:"auto",padding:0}}>
@@ -1339,7 +1380,7 @@ function VenueConfirm({year,month,shifts,vconf,sv,cfg,flash}){
         </div>;
       })}
     </div>}
-    {pending.length===0&&done.length===0&&
+{pending.length===0&&done.length===0&&
       <div style={{...GC,textAlign:"center",color:C.muted,padding:48}}>
         <div style={{fontSize:36,marginBottom:8}}>✅</div>
         <p style={{margin:0}}>この月の確定作業はありません</p>
@@ -1642,6 +1683,28 @@ const MC_COMPANIES = {
 };
 const MC_ROLES = ["司会","アシスタント","パントリー"];
 const MC_TYPES = ["2日葬","1日葬","通夜のみ"];
+const MC_RATE_KEYS = [
+  {key:"飛鳥通夜司会",label:"飛鳥 通夜司会"},
+  {key:"飛鳥葬儀司会",label:"飛鳥 葬儀司会"},
+  {key:"飛鳥通夜アシ",label:"飛鳥 通夜アシ"},
+  {key:"飛鳥葬儀アシ",label:"飛鳥 葬儀アシ"},
+  {key:"あしべ通夜司会",label:"あしべ 通夜司会"},
+  {key:"あしべ葬儀司会",label:"あしべ 葬儀司会"},
+  {key:"あしべパントリー",label:"あしべ パントリー"},
+  {key:"研修",label:"研修"},
+];
+const getMCRateKey=(company,role,type,training)=>{
+  if(training) return "研修";
+  const isA=company==="あしべの杜";
+  const isTsuya=type==="通夜のみ";
+  if(!isA){
+    if(role==="司会") return isTsuya?"飛鳥通夜司会":"飛鳥葬儀司会";
+    return isTsuya?"飛鳥通夜アシ":"飛鳥葬儀アシ";
+  }else{
+    if(role==="パントリー") return "あしべパントリー";
+    return isTsuya?"あしべ通夜司会":"あしべ葬儀司会";
+  }
+};
 
 const DEFAULT_MC_BILLING = {
   "飛鳥会館": {
@@ -1666,7 +1729,8 @@ function AttendanceSummaryView({year,month,att,shifts,vconf,cfg}){
   const [selected,setSelected]=useState(null);
 
   const actualVenue=(d,vName)=>{
-    if(vconf&&vconf[d]){if(typeof vconf[d]==="string") return vconf[d];if(vconf[d][vName]) return vconf[d][vName];}
+    const isFlexVenue=cfg.venues.find(v=>v.name===vName)?.options?.length>0;
+    if(isFlexVenue&&vconf&&vconf[d]){if(typeof vconf[d]==="string") return vconf[d];if(vconf[d][vName]) return vconf[d][vName];}
     return vName;
   };
 
@@ -1825,7 +1889,8 @@ function PrintableSheet({year,month,shifts,att,vconf,cfg}){
   const days=getDays(year,month);
 
   const actualVenue=(d,vName)=>{
-    if(vconf&&vconf[d]){if(typeof vconf[d]==="string") return vconf[d];if(vconf[d][vName]) return vconf[d][vName];}
+    const isFlexVenue=cfg.venues.find(v=>v.name===vName)?.options?.length>0;
+    if(isFlexVenue&&vconf&&vconf[d]){if(typeof vconf[d]==="string") return vconf[d];if(vconf[d][vName]) return vconf[d][vName];}
     if(vName==="多or蔵") return "蔵王・多治米";
     return vName;
   };
