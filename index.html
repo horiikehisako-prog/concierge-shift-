@@ -12,6 +12,7 @@
 <script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-database-compat.js"></script>
 <script>
 firebase.initializeApp({apiKey:"AIzaSyBpKNiDwL06_SI1z-oT2xB979A5gLIoM70",authDomain:"concierge-shift-prod.firebaseapp.com",databaseURL:"https://concierge-shift-prod-default-rtdb.asia-southeast1.firebasedatabase.app",projectId:"concierge-shift-prod",storageBucket:"concierge-shift-prod.firebasestorage.app",messagingSenderId:"561846878890",appId:"1:561846878890:web:ddb55b68d69a8b9d6d86d3"});
+const FIREBASE_DATABASE_REST_URL="https://concierge-shift-prod-default-rtdb.asia-southeast1.firebasedatabase.app";
 </script>
 <style>*{box-sizing:border-box;margin:0;padding:0;}body{font-family:'Hiragino Kaku Gothic ProN','Yu Gothic UI','Meiryo',sans-serif;}select,input,textarea,button{font-family:inherit;}@media print{body{background:#fff!important;color:#111!important}.no-print{display:none!important}.print-card{box-shadow:none!important;border:1px solid #ddd!important;background:#fff!important;break-inside:avoid}.print-table{font-size:10px!important}.print-table th,.print-table td{padding:4px 5px!important;border-color:#ccc!important}.print-title{font-size:18px!important;color:#111!important}@page{size:A4;margin:12mm}}</style>
 </head>
@@ -400,8 +401,32 @@ const buildShortageAlerts = ({year,month,prefs,shifts,cfg}) => {
 
 // ─── STORAGE ──────────────────────────────────────────────────
 const stParseStored=val=>{if(typeof val==="string"){try{return JSON.parse(val);}catch{return val;}}return val;};
-const stLoad=async k=>{try{const snap=await firebase.database().ref('/data/'+k).get();if(!snap.exists())return null;return stParseStored(snap.val());}catch(e){console.warn("Firebase load failed:",k,e);return null;}};
-const stSave=async(k,v)=>{await firebase.database().ref('/data/'+k).set(JSON.stringify(v));};
+const firebaseRestRequest=async(path,{method="GET",value,timeoutMs=15000}={})=>{
+  const user=firebase.auth().currentUser;
+  if(!user) throw new Error("ログイン情報を確認できませんでした。");
+  const controller=new AbortController();
+  let timer;
+  try{
+    const token=await Promise.race([
+      user.getIdToken(),
+      new Promise((_,reject)=>{timer=setTimeout(()=>reject(new Error("ログイン情報の確認がタイムアウトしました。")),timeoutMs);}),
+    ]);
+    clearTimeout(timer);
+    timer=setTimeout(()=>controller.abort(),timeoutMs);
+    const res=await fetch(`${FIREBASE_DATABASE_REST_URL}${path}.json?auth=${encodeURIComponent(token)}`,{
+      method,
+      headers:method==="GET"?undefined:{"Content-Type":"application/json"},
+      body:method==="GET"?undefined:JSON.stringify(value),
+      signal:controller.signal,
+    });
+    if(!res.ok) throw new Error(`データ通信に失敗しました（${res.status}）`);
+    return await res.json();
+  }finally{
+    clearTimeout(timer);
+  }
+};
+const stLoad=async k=>{try{return stParseStored(await firebaseRestRequest('/data/'+k));}catch(e){console.warn("Firebase load failed:",k,e);return null;}};
+const stSave=async(k,v)=>{await firebaseRestRequest('/data/'+k,{method:"PUT",value:JSON.stringify(v)});};
 const stUpdate=async(k,updater)=>{
   const ref=firebase.database().ref('/data/'+k);
   const res=await ref.transaction(current=>{
@@ -821,6 +846,9 @@ const DEFAULT_AI_SETTINGS = {
   jpyUsdRate:160,
   apiProxyPath:"/api/generate-narration",
 };
+// 本番運用では、ナレーションAIが完成するまで入口だけを非表示にする。
+// 教科書・設定・生成コードは残しているため、完成後は true にして再公開できる。
+const NARRATION_AI_PRODUCTION_ENABLED = false;
 const OPENAI_MODEL_OPTIONS=[
   {id:"gpt-5.5",label:"GPT-5.5",inputPricePer1MUsd:5,outputPricePer1MUsd:30},
   {id:"gpt-4.1-mini",label:"GPT-4.1 mini",inputPricePer1MUsd:0.15,outputPricePer1MUsd:0.60},
@@ -1092,7 +1120,7 @@ function App(){
 
   const flash=msg=>{setToast(msg);setTimeout(()=>setToast(""),2500);};
 
-  useEffect(()=>firebase.auth().onAuthStateChanged(async user=>{
+  const completeAuthentication=async user=>{
     if(!user){
       setRole(null);
       setUname("");
@@ -1102,8 +1130,7 @@ function App(){
     }
     setAuthReady(false);
     try{
-      const snap=await firebase.database().ref(`/access/${user.uid}`).get();
-      const access=snap.exists()?snap.val():null;
+      const access=await firebaseRestRequest(`/access/${user.uid}`);
       if(!access||access.enabled!==true||!access.role) throw new Error("このアカウントには利用権限が設定されていません。");
       setAccessProfile(access);
       setRole(access.role);
@@ -1115,7 +1142,28 @@ function App(){
       await firebase.auth().signOut();
       setAuthReady(true);
     }
-  }),[]);
+  };
+
+  useEffect(()=>{
+    let settled=false;
+    const timeout=setTimeout(()=>{
+      if(settled) return;
+      setAuthMessage("ログイン状態の確認に時間がかかっています。もう一度ログインしてください。");
+      setRole(null);
+      setAccessProfile(null);
+      setAuthReady(true);
+    },8000);
+    const unsubscribe=firebase.auth().onAuthStateChanged(async user=>{
+      await completeAuthentication(user);
+      settled=true;
+      clearTimeout(timeout);
+    });
+    return ()=>{
+      settled=true;
+      clearTimeout(timeout);
+      unsubscribe();
+    };
+  },[]);
 
   useEffect(()=>{
     const s=D.settings;
@@ -1230,8 +1278,7 @@ function App(){
     }
     sv.shifts(ns);
   };
-  if(!authReady) return <CompassLoadingScreen/>;
-  if(!role) return <FirebaseLogin message={authMessage} onMessage={setAuthMessage}/>;
+  if(!role) return <FirebaseLogin message={authMessage} onMessage={setAuthMessage} onAuthenticated={completeAuthentication}/>;
   if(accessProfile?.selectName===true&&!uname){
     if(busy||!D.settings) return <CompassLoadingScreen/>;
     return <ProductionNameSelect role={role} cfg={cfg} onSelect={setUname} onSignOut={()=>firebase.auth().signOut()}/>;
@@ -1284,11 +1331,12 @@ function CompassLoadingScreen(){
     <div style={{background:"rgba(255,255,255,.9)",borderRadius:16,padding:"28px 34px",textAlign:"center",boxShadow:"0 8px 30px rgba(124,45,10,.12)"}}>
       <div style={{fontWeight:800,color:"#7c2d0a",fontSize:18}}>{APP_NAME}</div>
       <div style={{marginTop:8,color:"#9a694c",fontSize:13}}>ログイン状態を確認しています…</div>
+      <button onClick={()=>firebase.auth().signOut()} style={{marginTop:16,background:"#fff",border:"1px solid #d6b49d",borderRadius:8,padding:"9px 14px",color:"#7c2d0a",fontSize:13,fontWeight:700,cursor:"pointer"}}>ログイン画面に戻る</button>
     </div>
   </div>;
 }
 
-function FirebaseLogin({message,onMessage}){
+function FirebaseLogin({message,onMessage,onAuthenticated}){
   const [email,setEmail]=useState("");
   const [password,setPassword]=useState("");
   const [submitting,setSubmitting]=useState(false);
@@ -1298,7 +1346,8 @@ function FirebaseLogin({message,onMessage}){
     setSubmitting(true);
     onMessage("");
     try{
-      await firebase.auth().signInWithEmailAndPassword(email.trim(),password);
+      const credential=await firebase.auth().signInWithEmailAndPassword(email.trim(),password);
+      await onAuthenticated(credential.user);
     }catch(e){
       const code=e?.code||"";
       const msg=code.includes("invalid-credential")||code.includes("wrong-password")||code.includes("user-not-found")
@@ -1420,7 +1469,7 @@ function RoleSelect({cfg,onSelect}){
       title:"式場スタッフを選択",
       desc:"司会、アシスタント、パントリーの記録だけに進みます。",
       items:[
-        {r:"mc", i:"🎤", l:"司会", s:"出勤記録・履歴・Compass AI"},
+        {r:"mc", i:"🎤", l:"司会", s:"出勤記録・履歴"},
         {r:"assist", i:"🤝", l:"アシスタント・パントリー", s:"出勤記録・履歴確認"},
       ],
     },
@@ -1568,7 +1617,7 @@ function AdminView(P){
     {id:"library",label:"📚 ナレーションライブラリ"},
     {id:"ai",    label:"Compass AI"},
     {id:"config",label:"⚙️ 設定"},
-  ];
+  ].filter(t=>NARRATION_AI_PRODUCTION_ENABLED||!["aiInbox","library","ai"].includes(t.id));
   return <div><MonthSel {...P}/><Tabs tabs={tabs} active={tab} onChange={setTab}/>
     {tab==="dashboard"&&<AdminDashboard {...P}/>}
     {tab==="aiInbox"&&<AIInboxView {...P}/>}
@@ -1579,7 +1628,7 @@ function AdminView(P){
     {tab==="mc"    &&<MCConfigTab    {...P}/>}
     {tab==="library"&&<CompassNarrationLibraryView {...P}/>}
     {tab==="ai"    &&<CompassNarrationView {...P}/>}
-    {tab==="support"&&<SupportManagerView {...P}/>}
+    {tab==="support"&&<SupportManagerView {...P} embedded/>}
     {tab==="config"&&<AdminConfig    {...P}/>}
   </div>;
 }
@@ -3395,13 +3444,13 @@ function MCStaffView(P) {
   const tabs = [
     { id:"record", label:"📝 出勤を記録" },
     { id:"history",label:"📋 履歴確認" },
-    ...(role==="mc" ? [{ id:"ai", label:"Compass AI" }] : []),
+    ...(role==="mc"&&NARRATION_AI_PRODUCTION_ENABLED ? [{ id:"ai", label:"Compass AI" }] : []),
   ];
   return (
     <div>
       <MonthSel year={year} month={month} setYear={setYear} setMonth={setMonth}/>
       <Tabs tabs={tabs} active={tab} onChange={setTab}/>
-      {role==="mc"&&tab!=="ai"&&(
+      {role==="mc"&&NARRATION_AI_PRODUCTION_ENABLED&&tab!=="ai"&&(
         <div style={{...GC,display:"flex",alignItems:"center",justifyContent:"space-between",gap:10,flexWrap:"wrap",
           background:"#fffaf5",border:`1px solid ${C.border}`,padding:"12px 14px"}}>
           <div>
@@ -3413,7 +3462,7 @@ function MCStaffView(P) {
       )}
       {tab==="record"  && <MCStaffRecord  {...P} jobRole={jobRole}/>}
       {tab==="history" && <MCStaffHistory {...P} jobRole={jobRole}/>}
-      {tab==="ai"      && <CompassNarrationView {...P}/>}
+      {NARRATION_AI_PRODUCTION_ENABLED&&tab==="ai"&&<CompassNarrationView {...P}/>}
     </div>
   );
 }
@@ -5398,7 +5447,22 @@ function SupportBadge(){
   return <div style={{display:"inline-flex",alignItems:"center",gap:6,background:"#fffbeb",border:"1px solid #f59e0b",color:"#92400e",
     borderRadius:999,padding:"5px 10px",fontSize:12,fontWeight:800}}>{APP_ENV_LABEL} · {DEV_BUILD_LABEL}</div>;
 }
-function SupportManagerView({cfg,sv,flash}){
+function SupportManagerView(P){
+  const [workspaceTab,setWorkspaceTab]=useState("shift");
+  const tabs=[
+    {id:"shift",label:"シフト確定"},
+    {id:"pref",label:"希望一覧"},
+    {id:"growth",label:"成長カルテ"},
+  ];
+  return <div>
+    {!P.embedded&&<MonthSel {...P}/>}
+    <Tabs tabs={tabs} active={workspaceTab} onChange={setWorkspaceTab}/>
+    {workspaceTab==="shift"&&<AdminShiftView {...P}/>}
+    {workspaceTab==="pref"&&<AdminPrefView {...P}/>}
+    {workspaceTab==="growth"&&<SupportGrowthManagerView {...P}/>}
+  </div>;
+}
+function SupportGrowthManagerView({cfg,sv,flash}){
   const [cards,setCards]=useState([]);
   const [templates,setTemplates]=useState(()=>normalizeTrainingTemplates(null));
   const [tab,setTab]=useState("cards");
