@@ -1,0 +1,18 @@
+{
+  "rules": {
+    "access": {
+      "$uid": {
+        ".read": "auth != null && ($uid === auth.uid || root.child('access').child(auth.uid).child('role').val() === 'admin')",
+        ".write": "auth != null && root.child('access').child(auth.uid).child('role').val() === 'admin'"
+      }
+    },
+    "data": {
+      ".read": true,
+      ".write": true
+    },
+    "$other": {
+      ".read": false,
+      ".write": false
+    }
+  }
+}

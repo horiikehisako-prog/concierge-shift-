@@ -401,32 +401,8 @@ const buildShortageAlerts = ({year,month,prefs,shifts,cfg}) => {
 
 // ─── STORAGE ──────────────────────────────────────────────────
 const stParseStored=val=>{if(typeof val==="string"){try{return JSON.parse(val);}catch{return val;}}return val;};
-const firebaseRestRequest=async(path,{method="GET",value,timeoutMs=15000}={})=>{
-  const user=firebase.auth().currentUser;
-  if(!user) throw new Error("ログイン情報を確認できませんでした。");
-  const controller=new AbortController();
-  let timer;
-  try{
-    const token=await Promise.race([
-      user.getIdToken(),
-      new Promise((_,reject)=>{timer=setTimeout(()=>reject(new Error("ログイン情報の確認がタイムアウトしました。")),timeoutMs);}),
-    ]);
-    clearTimeout(timer);
-    timer=setTimeout(()=>controller.abort(),timeoutMs);
-    const res=await fetch(`${FIREBASE_DATABASE_REST_URL}${path}.json?auth=${encodeURIComponent(token)}`,{
-      method,
-      headers:method==="GET"?undefined:{"Content-Type":"application/json"},
-      body:method==="GET"?undefined:JSON.stringify(value),
-      signal:controller.signal,
-    });
-    if(!res.ok) throw new Error(`データ通信に失敗しました（${res.status}）`);
-    return await res.json();
-  }finally{
-    clearTimeout(timer);
-  }
-};
-const stLoad=async k=>{try{return stParseStored(await firebaseRestRequest('/data/'+k));}catch(e){console.warn("Firebase load failed:",k,e);return null;}};
-const stSave=async(k,v)=>{await firebaseRestRequest('/data/'+k,{method:"PUT",value:JSON.stringify(v)});};
+const stLoad=async k=>{try{const snap=await firebase.database().ref('/data/'+k).get();return stParseStored(snap.val());}catch(e){console.warn("Firebase load failed:",k,e);return null;}};
+const stSave=async(k,v)=>{await firebase.database().ref('/data/'+k).set(JSON.stringify(v));};
 const stUpdate=async(k,updater)=>{
   const ref=firebase.database().ref('/data/'+k);
   const res=await ref.transaction(current=>{
@@ -1076,9 +1052,7 @@ function App(){
   const [month,setMonth]=useState(savedYmMatch?Number(savedYmMatch[2]):now.getMonth()+1);
   const [role,setRole]  =useState(null);
   const [uname,setUname]=useState("");
-  const [accessProfile,setAccessProfile]=useState(null);
-  const [authReady,setAuthReady]=useState(false);
-  const [authMessage,setAuthMessage]=useState("");
+  const [settingsReady,setSettingsReady]=useState(false);
   const [D,setD]=useState({settings:null,shifts:{},prefs:{},att:{},vconf:{},mcStaff:null,assistStaff:null,compassKb:[]});
   const [busy,setBusy]  =useState(false);
   const [toast,setToast]=useState("");
@@ -1120,49 +1094,14 @@ function App(){
 
   const flash=msg=>{setToast(msg);setTimeout(()=>setToast(""),2500);};
 
-  const completeAuthentication=async user=>{
-    if(!user){
-      setRole(null);
-      setUname("");
-      setAccessProfile(null);
-      setAuthReady(true);
-      return;
-    }
-    setAuthReady(false);
-    try{
-      const access=await firebaseRestRequest(`/access/${user.uid}`);
-      if(!access||access.enabled!==true||!access.role) throw new Error("このアカウントには利用権限が設定されていません。");
-      setAccessProfile(access);
-      setRole(access.role);
-      setUname(access.name||"");
-      setAuthMessage("");
-      setAuthReady(true);
-    }catch(e){
-      setAuthMessage(e?.message||"利用権限を確認できませんでした。");
-      await firebase.auth().signOut();
-      setAuthReady(true);
-    }
-  };
-
   useEffect(()=>{
-    let settled=false;
-    const timeout=setTimeout(()=>{
-      if(settled) return;
-      setAuthMessage("ログイン状態の確認に時間がかかっています。もう一度ログインしてください。");
-      setRole(null);
-      setAccessProfile(null);
-      setAuthReady(true);
-    },8000);
-    const unsubscribe=firebase.auth().onAuthStateChanged(async user=>{
-      await completeAuthentication(user);
-      settled=true;
-      clearTimeout(timeout);
+    let active=true;
+    stLoad("settings").then(settings=>{
+      if(!active) return;
+      if(settings) setD(d=>({...d,settings}));
+      setSettingsReady(true);
     });
-    return ()=>{
-      settled=true;
-      clearTimeout(timeout);
-      unsubscribe();
-    };
+    return ()=>{active=false;};
   },[]);
 
   useEffect(()=>{
@@ -1278,11 +1217,8 @@ function App(){
     }
     sv.shifts(ns);
   };
-  if(!role) return <FirebaseLogin message={authMessage} onMessage={setAuthMessage} onAuthenticated={completeAuthentication}/>;
-  if(accessProfile?.selectName===true&&!uname){
-    if(busy||!D.settings) return <CompassLoadingScreen/>;
-    return <ProductionNameSelect role={role} cfg={cfg} onSelect={setUname} onSignOut={()=>firebase.auth().signOut()}/>;
-  }
+  if(!settingsReady) return <CompassLoadingScreen/>;
+  if(!role) return <RoleSelect cfg={cfg} onSelect={(selectedRole,selectedName)=>{setRole(selectedRole);setUname(selectedName||"");}}/>;
 
   const P={year,month,setYear,setMonth,shifts:D.shifts,prefs:D.prefs,att:D.att,vconf:D.vconf,
     cfg,sv,generate,uname,role,busy,flash,compassKb:D.compassKb};
@@ -1293,7 +1229,7 @@ function App(){
       {toast&&<div style={{position:"fixed",top:16,right:16,zIndex:9999,background:C.navy,
         color:"#fff",padding:"10px 20px",borderRadius:10,fontSize:13,fontWeight:600,
         boxShadow:"0 4px 20px rgba(0,0,0,.2)"}}>{toast}</div>}
-      <TopBar role={role} uname={uname} onBack={()=>firebase.auth().signOut()} year={year} month={month}/>
+      <TopBar role={role} uname={uname} onBack={()=>{setRole(null);setUname("");}} year={year} month={month}/>
       <div style={{maxWidth:960,margin:"0 auto",padding:"16px 14px"}}>
         {busy&&<div style={{textAlign:"center",padding:60,color:C.muted}}><div style={{fontWeight:800,color:C.text,marginBottom:6}}>{APP_NAME}</div><div>{APP_SUBTITLE}</div><div style={{marginTop:10}}>読み込み中…</div></div>}
         {!busy&&role==="admin"  &&<AdminView  {...P}/>}
@@ -1330,8 +1266,7 @@ function CompassLoadingScreen(){
   return <div style={{minHeight:"100vh",background:"linear-gradient(160deg,#fde8d4 0%,#fbd4b4 50%,#f9c4a0 100%)",display:"flex",alignItems:"center",justifyContent:"center",padding:24}}>
     <div style={{background:"rgba(255,255,255,.9)",borderRadius:16,padding:"28px 34px",textAlign:"center",boxShadow:"0 8px 30px rgba(124,45,10,.12)"}}>
       <div style={{fontWeight:800,color:"#7c2d0a",fontSize:18}}>{APP_NAME}</div>
-      <div style={{marginTop:8,color:"#9a694c",fontSize:13}}>ログイン状態を確認しています…</div>
-      <button onClick={()=>firebase.auth().signOut()} style={{marginTop:16,background:"#fff",border:"1px solid #d6b49d",borderRadius:8,padding:"9px 14px",color:"#7c2d0a",fontSize:13,fontWeight:700,cursor:"pointer"}}>ログイン画面に戻る</button>
+      <div style={{marginTop:8,color:"#9a694c",fontSize:13}}>設定を読み込んでいます…</div>
     </div>
   </div>;
 }
