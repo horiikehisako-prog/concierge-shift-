@@ -311,13 +311,20 @@ const normalizeConciergeVenues = venues => {
   const byName = new Map(current.filter(v => CONCIERGE_WORK_VENUES.includes(v.name)).map(v => [v.name,v]));
   return CONCIERGE_WORK_VENUES.map(name => byName.get(name) || {name,options:[]});
 };
+const REQUIRED_CEREMONY_TYPES = [
+  {id:"type-wake",label:"通夜だけ"},
+  {id:"type-funeral",label:"葬儀だけ"},
+  {id:"type-both",label:"通夜・葬儀両方"},
+];
 const normalizeCeremonyLabel = label => {
-  if(label==="通夜のみ") return "通夜";
-  if(label==="1日葬" || label==="2日葬") return "葬儀";
-  return label;
+  const value=String(label||"").trim();
+  if(value==="通夜" || value==="通夜のみ") return "通夜だけ";
+  if(value==="葬儀" || value==="葬儀のみ" || value==="1日葬") return "葬儀だけ";
+  if(value==="通夜葬儀両方" || value==="通夜・葬儀" || value==="両方" || value==="2日葬") return "通夜・葬儀両方";
+  return value;
 };
 const normalizeCeremonyTypes = types => {
-  const src = ensureArray(types).length ? ensureArray(types) : [{id:"type-wake",label:"通夜"},{id:"type-funeral",label:"葬儀"}];
+  const src = ensureArray(types).length ? ensureArray(types) : REQUIRED_CEREMONY_TYPES;
   const seen = new Set();
   const normalized = src.map((t,i)=>{
     const label = normalizeCeremonyLabel(typeof t==="string" ? t : t.label || t.name || "");
@@ -327,7 +334,13 @@ const normalizeCeremonyTypes = types => {
     seen.add(t.label);
     return true;
   });
-  const priority = { "通夜": 0, "葬儀": 1 };
+  REQUIRED_CEREMONY_TYPES.forEach(required=>{
+    if(!seen.has(required.label)){
+      normalized.push({...required});
+      seen.add(required.label);
+    }
+  });
+  const priority = { "通夜だけ": 0, "葬儀だけ": 1, "通夜・葬儀両方": 2 };
   return normalized.sort((a,b)=>(priority[a.label] ?? 10) - (priority[b.label] ?? 10));
 };
 const yen  = n => n.toLocaleString("ja-JP")+"円";
@@ -3426,7 +3439,7 @@ function MCStaffRecord({ year, month, uname, role, cfg, flash, shifts, att, vcon
   const ceremonyTypes=getCeremonyTypes(cfg).map(t=>t.label);
   const roleMasters=getRoles(cfg);
   const roles=roleMasters.map(r=>r.label);
-  const defaultType=ceremonyTypes[0]||"通夜";
+  const defaultType=ceremonyTypes[0]||"通夜だけ";
   const clientVenues=company=>{
     const client=clients.find(c=>c.label===company);
     return client?.venues?.length?client.venues:(company?[company]:[]);
@@ -3558,10 +3571,10 @@ function MCStaffRecord({ year, month, uname, role, cfg, flash, shifts, att, vcon
       {form.venue && actualRole!=="パントリー" && (
         <div style={{marginBottom:16}}>
           <label style={{fontSize:12,color:C.muted,display:"block",marginBottom:8}}>📋 STEP 3　種別</label>
-          <div style={{display:"flex",gap:8}}>
+          <div style={{display:"flex",gap:8,flexWrap:"wrap"}}>
             {ceremonyTypes.map(t=>(
               <button key={t} onClick={()=>setForm({...form,type:t})}
-                style={{flex:1,border:`2px solid ${form.type===t?C.purple:C.border}`,
+                style={{flex:"1 1 100px",border:`2px solid ${form.type===t?C.purple:C.border}`,
                   borderRadius:10,padding:"10px 6px",cursor:"pointer",fontSize:12,fontWeight:700,
                   background:form.type===t?"#ede9fe":"#fff",
                   color:form.type===t?C.purple:C.muted}}>
@@ -3644,7 +3657,7 @@ function MCStaffHistory({ year, month, uname, role, cfg }) {
                 <div style={{fontWeight:700,fontSize:14}}>{r.date}</div>
                 <div style={{fontSize:12,color:C.muted,marginTop:3}}>
                   {r.company}　{r.venue}
-                  {jobRole==="司会"&&<span style={{marginLeft:6,color:C.purple,fontWeight:600}}>（{r.type}）</span>}
+                  {jobRole==="司会"&&<span style={{marginLeft:6,color:C.purple,fontWeight:600}}>（{normalizeCeremonyLabel(r.type)}）</span>}
                 </div>
               </div>
               {pay>0&&<span style={{color:C.green,fontWeight:700,fontSize:13}}>{yen(pay)}</span>}
@@ -4619,7 +4632,7 @@ const MC_VENUE_ALIASES = {
   "あしべの杜": {"追憶の杜":"追憶"},
 };
 const MC_ROLES = ["司会","アシスタント","パントリー"];
-const MC_TYPES = ["通夜","葬儀"];
+const MC_TYPES = REQUIRED_CEREMONY_TYPES.map(t=>t.label);
 const MC_RATE_KEYS = [
   {key:"飛鳥通夜司会",label:"飛鳥 通夜司会"},
   {key:"飛鳥葬儀司会",label:"飛鳥 葬儀司会"},
@@ -4633,7 +4646,8 @@ const MC_RATE_KEYS = [
 const getMCRateKey=(company,role,type,training)=>{
   if(training) return "研修";
   const isA=company==="あしべの杜";
-  const isTsuya=normalizeCeremonyLabel(type)==="通夜";
+  const normalizedType=normalizeCeremonyLabel(type);
+  const isTsuya=normalizedType==="通夜だけ";
   if(!isA){
     if(role==="司会") return isTsuya?"飛鳥通夜司会":"飛鳥葬儀司会";
     return isTsuya?"飛鳥通夜アシ":"飛鳥葬儀アシ";
@@ -4645,24 +4659,28 @@ const getMCRateKey=(company,role,type,training)=>{
 
 const DEFAULT_MC_BILLING = {
   "飛鳥会館": {
-    "司会":    { "通夜":18000, "葬儀":30000 },
-    "アシスタント": { "通夜":10000, "葬儀":10000 },
-    "パントリー":   { "通夜":0, "葬儀":0 },
+    "司会":    { "通夜だけ":18000, "葬儀だけ":30000, "通夜・葬儀両方":48000 },
+    "アシスタント": { "通夜だけ":10000, "葬儀だけ":10000, "通夜・葬儀両方":20000 },
+    "パントリー":   { "通夜だけ":0, "葬儀だけ":0, "通夜・葬儀両方":0 },
   },
   "あしべの杜": {
-    "司会":    { "通夜":0, "葬儀":0 },
-    "アシスタント": { "通夜":0, "葬儀":0 },
-    "パントリー":   { "通夜":0, "葬儀":0 },
+    "司会":    { "通夜だけ":0, "葬儀だけ":0, "通夜・葬儀両方":0 },
+    "アシスタント": { "通夜だけ":0, "葬儀だけ":0, "通夜・葬儀両方":0 },
+    "パントリー":   { "通夜だけ":0, "葬儀だけ":0, "通夜・葬儀両方":0 },
   },
 };
 const getBillingAmount = (billing, company, role, type) => {
   const normalized = normalizeCeremonyLabel(type);
   const byRole = billing?.[company]?.[role] || {};
   if(byRole[normalized]!==undefined) return byRole[normalized]||0;
-  if(normalized==="通夜" && byRole["通夜のみ"]!==undefined) return byRole["通夜のみ"]||0;
-  if(normalized==="葬儀") {
-    if(byRole["2日葬"]!==undefined) return byRole["2日葬"]||0;
+  if(normalized==="通夜だけ") return byRole["通夜"]??byRole["通夜のみ"]??0;
+  if(normalized==="葬儀だけ") {
+    if(byRole["葬儀"]!==undefined) return byRole["葬儀"]||0;
     if(byRole["1日葬"]!==undefined) return byRole["1日葬"]||0;
+  }
+  if(normalized==="通夜・葬儀両方") {
+    if(byRole["2日葬"]!==undefined) return byRole["2日葬"]||0;
+    return getBillingAmount(billing,company,role,"通夜だけ")+getBillingAmount(billing,company,role,"葬儀だけ");
   }
   return 0;
 };
@@ -4674,8 +4692,7 @@ const DEFAULT_ITEM_SETTINGS = {
     {id:"ashibe",label:"あしべの杜",shortLabel:"あしべ",venues:MC_COMPANIES["あしべの杜"]},
   ],
   ceremonyTypes:[
-    {id:"type-wake",label:"通夜"},
-    {id:"type-funeral",label:"葬儀"},
+    ...REQUIRED_CEREMONY_TYPES.map(t=>({...t})),
   ],
   roles:[
     {id:"mc",label:"司会",usesCeremony:true},
@@ -4730,7 +4747,9 @@ function normalizeItemSettings(settings){
 }
 const legacyPayColumnId = (client,type,role) => {
   if(role.training||role.label==="研修") return "training";
-  const isWake = normalizeCeremonyLabel(type?.label)==="通夜";
+  const normalizedType=normalizeCeremonyLabel(type?.label);
+  if(normalizedType==="通夜・葬儀両方") return null;
+  const isWake = normalizedType==="通夜だけ";
   if(client.label==="飛鳥会館"&&role.label==="司会"&&isWake) return "asuka-wake-mc";
   if(client.label==="飛鳥会館"&&role.label==="司会") return "asuka-funeral-mc";
   if(client.label==="飛鳥会館"&&role.label==="アシスタント"&&isWake) return "asuka-wake-assist";
@@ -4761,13 +4780,16 @@ function findPayColumn(cfg, rec){
   if(rec.training) return cols.find(c=>c.training)||cols.find(c=>c.role==="研修");
   const recType = normalizeCeremonyLabel(rec.type);
   return cols.find(c=>!c.training&&c.company===rec.company&&c.role===rec.role&&normalizeCeremonyLabel(c.type)===recType)
-    || cols.find(c=>!c.training&&c.company===rec.company&&c.role===rec.role&&c.type==="葬儀")
+    || cols.find(c=>!c.training&&c.company===rec.company&&c.role===rec.role&&normalizeCeremonyLabel(c.type)==="葬儀だけ")
     || cols.find(c=>!c.training&&c.company===rec.company&&c.role===rec.role)
     || null;
 }
 function getStaffPayRate(cfg, staffName, rec){
   const col=findPayColumn(cfg,rec);
   if(col && cfg.mcRatesV2?.[staffName]?.[col.id]!==undefined) return cfg.mcRatesV2[staffName][col.id]||0;
+  if(normalizeCeremonyLabel(rec.type)==="通夜・葬儀両方"){
+    return getStaffPayRate(cfg,staffName,{...rec,type:"通夜だけ"})+getStaffPayRate(cfg,staffName,{...rec,type:"葬儀だけ"});
+  }
   const legacyKey = rec.training ? "研修" : rec.role;
   if(cfg.mcRates?.[staffName]?.[rec.company]?.[legacyKey]!==undefined) return cfg.mcRates[staffName][rec.company][legacyKey]||0;
   const legacyDerived = getMCRateKey(rec.company,rec.role,rec.type,rec.training);
@@ -5822,7 +5844,7 @@ function MCRecordTab({ year, month, cfg, uname, flash, shifts, att, vconf }) {
   const clients=getClients(cfg);
   const ceremonyTypes=getCeremonyTypes(cfg).map(t=>t.label);
   const roles=getRoles(cfg).filter(r=>!r.training).map(r=>r.label);
-  const defaultType=ceremonyTypes[0]||"通夜";
+  const defaultType=ceremonyTypes[0]||"通夜だけ";
   const defaultClient=clients[0]||{label:"",venues:[]};
   const defaultRole=roles[0]||"司会";
   const [records, setRecords] = useState([]);
@@ -5924,10 +5946,10 @@ function MCRecordTab({ year, month, cfg, uname, flash, shifts, att, vconf }) {
           {form.role!=="パントリー"&&(
             <div>
               <label style={{fontSize:12,color:C.muted,display:"block",marginBottom:4}}>種別</label>
-              <div style={{display:"flex",gap:6}}>
+              <div style={{display:"flex",gap:6,flexWrap:"wrap"}}>
                 {ceremonyTypes.map(t=>(
                   <button key={t} onClick={()=>setForm({...form,type:t})}
-                    style={{flex:1,border:`2px solid ${form.type===t?C.purple:C.border}`,
+                    style={{flex:"1 1 100px",border:`2px solid ${form.type===t?C.purple:C.border}`,
                       borderRadius:8,padding:"8px 4px",cursor:"pointer",fontSize:11,fontWeight:700,
                       background:form.type===t?C.purpleLight||"#ede9fe":"#fff",
                       color:form.type===t?C.purple:C.muted}}>
@@ -5967,7 +5989,7 @@ function MCRecordTab({ year, month, cfg, uname, flash, shifts, att, vconf }) {
             <div style={{flex:1}}>
               <div style={{fontWeight:700,fontSize:13}}>{r.date}　{r.company}</div>
               <div style={{fontSize:12,color:C.muted,marginTop:2}}>
-                {r.venue}　{r.role}{r.role!=="パントリー"?`（${r.type}）`:""}
+                {r.venue}　{r.role}{r.role!=="パントリー"?`（${normalizeCeremonyLabel(r.type)}）`:""}
               </div>
             </div>
             <button onClick={()=>del(r.id)}
