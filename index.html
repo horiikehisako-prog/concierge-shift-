@@ -2917,8 +2917,9 @@ function StaffView(P){
 
 function StaffWish({year,month,prefs,sv,uname}){
   const days=getDays(year,month);
+  const [inputStatus,setInputStatus]=useState(AVAIL_OK);
   const myStatus=d=>prefStatus(prefs,uname,d);
-  const myDays=Array.from({length:days},(_,i)=>i+1).filter(d=>isAvailableStatus(myStatus(d)));
+  const myDays=Array.from({length:days},(_,i)=>i+1).filter(d=>!!myStatus(d));
   const okDays=Array.from({length:days},(_,i)=>i+1).filter(d=>myStatus(d)===AVAIL_OK);
   const maybeDays=Array.from({length:days},(_,i)=>i+1).filter(d=>myStatus(d)===AVAIL_MAYBE);
   const ngDays=Array.from({length:days},(_,i)=>i+1).filter(d=>myStatus(d)===AVAIL_NG);
@@ -2936,15 +2937,13 @@ function StaffWish({year,month,prefs,sv,uname}){
   const diffMs   = deadline - today;
   const diffDays = Math.ceil(diffMs / (1000*60*60*24));
 
-  const toggle=d=>{
+  const setDayStatus=d=>{
     if(isLocked) return;
     const cur=prefs[uname];
     const next={};
     if(Array.isArray(cur)) cur.forEach(day=>{next[day]=AVAIL_OK;});
     else if(cur&&typeof cur==="object") Object.assign(next,cur);
-    const idx=AVAIL_ORDER.indexOf(myStatus(d));
-    const ns=AVAIL_ORDER[(idx+1)%AVAIL_ORDER.length];
-    if(ns) next[d]=ns; else delete next[d];
+    if(inputStatus) next[d]=inputStatus; else delete next[d];
     sv.prefs({...prefs,[uname]:next});
   };
 
@@ -2968,7 +2967,7 @@ function StaffWish({year,month,prefs,sv,uname}){
     <p style={{color:C.muted,fontSize:12,margin:"0 0 14px"}}>
       {isLocked
         ? `${year}年${month}月分の希望受付は終了しました`
-        : "出勤できる日をタップ → 緑になったら登録されます"}
+        : "○・△・×を選んでから、カレンダーの日付をタップしてください"}
     </p>
 
     {isLocked && (
@@ -2991,6 +2990,21 @@ function StaffWish({year,month,prefs,sv,uname}){
 
     {!isLocked && (
       <>
+        <div style={{background:"#f8fafc",border:`1px solid ${C.border}`,borderRadius:10,padding:10,marginBottom:12}}>
+          <div style={{fontSize:12,fontWeight:700,color:C.text,marginBottom:8}}>入力する希望を選択</div>
+          <div style={{display:"grid",gridTemplateColumns:"repeat(4,1fr)",gap:6}}>
+            {[
+              {value:AVAIL_OK,label:"○ 出勤可能",color:C.green,bg:C.greenL},
+              {value:AVAIL_MAYBE,label:"△ 相談可能",color:C.amber,bg:C.amberL},
+              {value:AVAIL_NG,label:"× 出勤不可",color:C.red,bg:C.redL},
+              {value:"",label:"消す",color:C.muted,bg:"#fff"},
+            ].map(option=><button key={option.value||"clear"} onClick={()=>setInputStatus(option.value)}
+              style={{padding:"9px 4px",border:inputStatus===option.value?`2px solid ${option.color}`:`1px solid ${C.border}`,
+                borderRadius:8,background:inputStatus===option.value?option.bg:"#fff",color:option.color,
+                fontSize:11,fontWeight:800,cursor:"pointer"}}>{option.label}</button>)}
+          </div>
+          <div style={{fontSize:11,color:C.muted,marginTop:7}}>選んだ記号で、複数の日付を続けて入力できます。</div>
+        </div>
         <div style={{display:"grid",gridTemplateColumns:"repeat(7,1fr)",gap:4,marginBottom:12}}>
           {WEEKDAYS.map((w,i)=><div key={w} style={{textAlign:"center",fontSize:11,fontWeight:700,
             padding:"4px 0",color:i===0?C.sun:i===6?C.sat:C.muted}}>{w}</div>)}
@@ -3000,7 +3014,7 @@ function StaffWish({year,month,prefs,sv,uname}){
             const picked=!!st;
             const color=st===AVAIL_OK?C.green:st===AVAIL_MAYBE?C.amber:st===AVAIL_NG?C.red:(wdi===0?C.sun:wdi===6?C.sat:C.text);
             const bg=st===AVAIL_OK?C.greenL:st===AVAIL_MAYBE?C.amberL:st===AVAIL_NG?C.redL:"#fff";
-            return <button key={d} onClick={()=>toggle(d)}
+            return <button key={d} onClick={()=>setDayStatus(d)}
               style={{padding:"8px 4px",border:picked?`2px solid ${color}`:`1px solid ${C.border}`,
                 borderRadius:8,cursor:"pointer",fontSize:13,fontWeight:700,
                 background:bg,color}}>
