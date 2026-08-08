@@ -343,6 +343,29 @@ const normalizeCeremonyTypes = types => {
   const priority = { "通夜だけ": 0, "葬儀だけ": 1, "通夜・葬儀両方": 2 };
   return normalized.sort((a,b)=>(priority[a.label] ?? 10) - (priority[b.label] ?? 10));
 };
+const BOTH_CEREMONY_TYPE = "通夜・葬儀両方";
+const normalizeCalendarDate = value => String(value||"").trim().replace(/\//g,"-");
+const displayCalendarDate = value => normalizeCalendarDate(value).replace(/-/g,"/");
+const addCalendarDays = (value,days=1) => {
+  const parts=normalizeCalendarDate(value).split("-").map(Number);
+  if(parts.length!==3||parts.some(Number.isNaN)) return "";
+  const date=new Date(Date.UTC(parts[0],parts[1]-1,parts[2]));
+  date.setUTCDate(date.getUTCDate()+days);
+  return `${date.getUTCFullYear()}-${p2(date.getUTCMonth()+1)}-${p2(date.getUTCDate())}`;
+};
+const getMCCeremonySchedule = record => {
+  const type=normalizeCeremonyLabel(record?.type);
+  const first=normalizeCalendarDate(record?.wakeDate||record?.date);
+  if(type!==BOTH_CEREMONY_TYPE) return [{date:first,label:type,index:1,total:1}];
+  const second=normalizeCalendarDate(record?.funeralDate)||addCalendarDays(first,1);
+  return [
+    {date:first,label:"通夜だけ",index:1,total:2},
+    {date:second,label:"葬儀だけ",index:2,total:2},
+  ];
+};
+const getMCCeremonyDateText = record => getMCCeremonySchedule(record)
+  .map(item=>`${item.label.replace("だけ","")} ${displayCalendarDate(item.date)}`)
+  .join(" ／ ");
 const yen  = n => n.toLocaleString("ja-JP")+"円";
 
 const parseHours = (s="09:00",e="16:00",breakMin=60) => {
@@ -2620,12 +2643,13 @@ function buildMCBillingRows(records,cfg){
   const billing=cfg.mcBilling||DEFAULT_MC_BILLING;
   return records.map(r=>{
     const ceremony=normalizeCeremonyLabel(r.role==="パントリー"?(getCeremonyTypes(cfg)[0]?.label||"通夜"):(r.type||"通夜"));
+    const schedule=getMCCeremonySchedule(r);
     const sub=getBillingAmount(billing,r.company,r.role,ceremony);
     const tax=Math.round(sub*TAX_RATE);
     return {
-      source:"mc",date:r.date||"",d:Number(String(r.date||"").split(/[/-]/)[2]||0),staff:r.staff||"",
+      source:"mc",date:schedule.length===2?getMCCeremonyDateText(r):(r.date||""),d:Number(String(schedule[0]?.date||r.date||"").split(/[/-]/)[2]||0),staff:r.staff||"",
       company:r.company||"未設定",venue:r.venue||"",role:r.role||"",workType:r.role==="パントリー"?r.role:`${ceremony}${r.role||""}`,
-      type:ceremony,hours:0,count:1,unit:sub,sub,tax,total:sub+tax,status:"登録済"
+      type:ceremony,hours:0,count:1,workDays:schedule.length,unit:sub,sub,tax,total:sub+tax,status:"登録済"
     };
   });
 }
@@ -2706,11 +2730,12 @@ function MonthlyInvoiceList(P){
 
 function normalizeMonthlyMCRecord(r,cfg){
   const rate=getStaffPayRate(cfg,r.staff,r);
-  const parts=String(r.date||"").split(/[/-]/).map(Number);
+  const schedule=getMCCeremonySchedule(r);
+  const parts=String(schedule[0]?.date||r.date||"").split(/[/-]/).map(Number);
   return {
-    source:"mc",date:r.date||"",d:parts[2]||0,staff:r.staff,role:r.role||"",
+    source:"mc",date:schedule.length===2?getMCCeremonyDateText(r):(r.date||""),d:parts[2]||0,staff:r.staff,role:r.role||"",
     client:r.company||"",location:r.venue||"",start:"",end:"",breakMin:"",
-    hours:0,dailyCount:1,rate,amount:rate,status:"登録済",approved:true,
+    hours:0,dailyCount:1,workDays:schedule.length,rate,amount:rate,status:"登録済",approved:true,
     note:r.training?"研修":(r.type||"")
   };
 }
@@ -2724,7 +2749,7 @@ function MonthlyPayrollList(P){
   const summary=Object.values(allRows.reduce((map,r)=>{
     const key=`${r.staff}__${r.role}__${r.source}`;
     if(!map[key]) map[key]={staff:r.staff,role:r.role,source:r.source,days:0,hours:0,dailyCount:0,rate:r.rate,amount:0};
-    map[key].days++;
+    map[key].days+=r.workDays||1;
     map[key].hours+=r.hours||0;
     map[key].dailyCount+=r.dailyCount||0;
     map[key].amount+=r.amount||0;
@@ -3440,13 +3465,14 @@ function MCStaffRecord({ year, month, uname, role, cfg, flash, shifts, att, vcon
   const roleMasters=getRoles(cfg);
   const roles=roleMasters.map(r=>r.label);
   const defaultType=ceremonyTypes[0]||"通夜だけ";
+  const initialDate=`${year}-${p2(month)}-${p2(today.getDate())}`;
   const clientVenues=company=>{
     const client=clients.find(c=>c.label===company);
     return client?.venues?.length?client.venues:(company?[company]:[]);
   };
   const [form, setForm] = useState({
     company:"", venue:"", type:defaultType, assistRole:"アシスタント", training:false,
-    date:`${year}-${p2(month)}-${p2(today.getDate())}`,
+    date:initialDate, funeralDate:addCalendarDays(initialDate,1),
   });
   const [saving, setSaving] = useState(false);
   const [showShiftPrint,setShowShiftPrint]=useState(false);
@@ -3457,16 +3483,18 @@ function MCStaffRecord({ year, month, uname, role, cfg, flash, shifts, att, vcon
   const actualRole = jobRole==="アシスタント" ? form.assistRole : jobRole;
   const myRate = getStaffPayRate(cfg,uname,{company:form.company,role:actualRole,type:form.type,training:form.training});
 
-  const reset = () => { setForm({company:"",venue:"",type:defaultType,assistRole:"アシスタント",training:false,date:`${year}-${p2(month)}-${p2(today.getDate())}`}); };
+  const reset = () => { setForm({company:"",venue:"",type:defaultType,assistRole:"アシスタント",training:false,date:initialDate,funeralDate:addCalendarDays(initialDate,1)}); };
 
   const save = async () => {
     setSaving(true);
     const existing = await stLoad(storageKey) || [];
+    const isTwoDay=normalizeCeremonyLabel(form.type)===BOTH_CEREMONY_TYPE;
     const newRec = {
       id: Date.now(), staff: uname, role: actualRole,
       company: form.company, venue: form.venue,
       type: actualRole==="パントリー"?"－":form.type,
-      date: form.date.replace(/-/g,"/"),
+      date: displayCalendarDate(form.date),
+      ...(isTwoDay?{wakeDate:displayCalendarDate(form.date),funeralDate:displayCalendarDate(form.funeralDate),twoDay:true}:{}),
       training: form.training,
       createdAt: new Date().toISOString(),
     };
@@ -3477,7 +3505,11 @@ function MCStaffRecord({ year, month, uname, role, cfg, flash, shifts, att, vcon
   };
 
   const colors = { [clients[0]?.label||""]:"#e8784a", [clients[1]?.label||""]:"#6b8fb0" };
-  const canSave = form.venue && (actualRole==="パントリー" ? true : !!form.type);
+  const isTwoDay=actualRole!=="パントリー"&&normalizeCeremonyLabel(form.type)===BOTH_CEREMONY_TYPE;
+  const hasValidTwoDayDates=!isTwoDay||(
+    !!normalizeCalendarDate(form.funeralDate)&&normalizeCalendarDate(form.funeralDate)>normalizeCalendarDate(form.date)
+  );
+  const canSave = form.venue && (actualRole==="パントリー" ? true : !!form.type) && hasValidTwoDayDates;
 
   return (
     <div>
@@ -3491,9 +3523,9 @@ function MCStaffRecord({ year, month, uname, role, cfg, flash, shifts, att, vcon
 
       {/* 日付 */}
       <div style={{marginBottom:16}}>
-        <label style={{fontSize:12,color:C.muted,display:"block",marginBottom:4}}>📅 勤務日</label>
+        <label style={{fontSize:12,color:C.muted,display:"block",marginBottom:4}}>📅 {isTwoDay?"通夜日":"勤務日"}</label>
         <input type="date" value={form.date}
-          onChange={e=>setForm({...form,date:e.target.value})}
+          onChange={e=>setForm({...form,date:e.target.value,...(isTwoDay?{funeralDate:addCalendarDays(e.target.value,1)}:{})})}
           style={{border:`1px solid ${C.border}`,borderRadius:8,padding:"10px 14px",fontSize:15,width:"100%",boxSizing:"border-box"}}/>
       </div>
 
@@ -3573,7 +3605,7 @@ function MCStaffRecord({ year, month, uname, role, cfg, flash, shifts, att, vcon
           <label style={{fontSize:12,color:C.muted,display:"block",marginBottom:8}}>📋 STEP 3　種別</label>
           <div style={{display:"flex",gap:8,flexWrap:"wrap"}}>
             {ceremonyTypes.map(t=>(
-              <button key={t} onClick={()=>setForm({...form,type:t})}
+              <button key={t} onClick={()=>setForm({...form,type:t,...(normalizeCeremonyLabel(t)===BOTH_CEREMONY_TYPE?{funeralDate:form.funeralDate||addCalendarDays(form.date,1)}:{})})}
                 style={{flex:"1 1 100px",border:`2px solid ${form.type===t?C.purple:C.border}`,
                   borderRadius:10,padding:"10px 6px",cursor:"pointer",fontSize:12,fontWeight:700,
                   background:form.type===t?"#ede9fe":"#fff",
@@ -3582,6 +3614,15 @@ function MCStaffRecord({ year, month, uname, role, cfg, flash, shifts, att, vcon
               </button>
             ))}
           </div>
+          {isTwoDay&&<div style={{marginTop:12,background:"#f8f0ff",border:`1px solid ${C.purple}33`,borderRadius:10,padding:12}}>
+            <label style={{fontSize:12,color:C.purple,display:"block",marginBottom:5,fontWeight:800}}>📅 葬儀日（自動で翌日を入力）</label>
+            <input type="date" value={form.funeralDate||""}
+              min={addCalendarDays(form.date,1)}
+              onChange={e=>setForm({...form,funeralDate:e.target.value})}
+              style={{border:`1px solid ${C.border}`,borderRadius:8,padding:"10px 14px",fontSize:15,width:"100%",boxSizing:"border-box"}}/>
+            {!hasValidTwoDayDates&&<div style={{fontSize:12,color:C.red,marginTop:6,fontWeight:700}}>葬儀日は通夜日の翌日以降を選んでください</div>}
+            {hasValidTwoDayDates&&<div style={{fontSize:12,color:C.muted,marginTop:6}}>通夜 {displayCalendarDate(form.date)} ／ 葬儀 {displayCalendarDate(form.funeralDate)} の2日間セットで記録します</div>}
+          </div>}
         </div>
       )}
 
@@ -3590,7 +3631,7 @@ function MCStaffRecord({ year, month, uname, role, cfg, flash, shifts, att, vcon
         <div style={{background:"#f8f0ff",borderRadius:12,padding:16,marginBottom:14}}>
           <div style={{fontSize:12,color:C.muted,marginBottom:8,fontWeight:600}}>📋 確認</div>
           {[
-            ["日付",form.date.replace(/-/g,"/")],
+            ...(isTwoDay?[["通夜日",displayCalendarDate(form.date)],["葬儀日",displayCalendarDate(form.funeralDate)],["日程","2日間セット"]]:[["日付",displayCalendarDate(form.date)]]),
             ["会社",form.company],
             ["会場",form.venue],
             ["役割",actualRole],
@@ -3650,14 +3691,17 @@ function MCStaffHistory({ year, month, uname, role, cfg }) {
       {records.length===0&&<p style={{color:C.muted,fontSize:13}}>この月の記録はありません</p>}
       {records.sort((a,b)=>a.date>b.date?1:-1).map(r=>{
         const pay = getStaffPayRate(cfg,uname,r);
+        const schedule=getMCCeremonySchedule(r);
+        const isTwoDay=schedule.length===2;
         return (
           <div key={r.id} style={{borderBottom:`1px solid ${C.border}`,padding:"12px 0"}}>
             <div style={{display:"flex",alignItems:"center",gap:8,flexWrap:"wrap"}}>
               <div style={{flex:1}}>
-                <div style={{fontWeight:700,fontSize:14}}>{r.date}</div>
+                <div style={{fontWeight:700,fontSize:14}}>{isTwoDay?getMCCeremonyDateText(r):displayCalendarDate(r.date)}</div>
                 <div style={{fontSize:12,color:C.muted,marginTop:3}}>
                   {r.company}　{r.venue}
                   {jobRole==="司会"&&<span style={{marginLeft:6,color:C.purple,fontWeight:600}}>（{normalizeCeremonyLabel(r.type)}）</span>}
+                  {isTwoDay&&<span style={{marginLeft:6,background:"#ede9fe",color:C.purple,borderRadius:999,padding:"2px 7px",fontWeight:800}}>2日間セット</span>}
                 </div>
               </div>
               {pay>0&&<span style={{color:C.green,fontWeight:700,fontSize:13}}>{yen(pay)}</span>}
@@ -6029,7 +6073,8 @@ function MCAccountingView({ year, month, cfg }) {
       const rate = getStaffPayRate(cfg,name,r);
       pay += rate;
     });
-    return { name, count:recs.length, pay, recs };
+    const days=recs.reduce((sum,r)=>sum+getMCCeremonySchedule(r).length,0);
+    return { name, count:recs.length, days, pay, recs };
   }).filter(s=>s.count>0);
 
   // 葬儀場別請求集計
@@ -6058,7 +6103,7 @@ function MCAccountingView({ year, month, cfg }) {
       const pay = getStaffPayRate(cfg,r.staff,r);
       const t   = normalizeCeremonyLabel(r.role==="パントリー"?(getCeremonyTypes(cfg)[0]?.label||"通夜"):(r.type||"通夜"));
       const bill= getBillingAmount(billing, r.company, r.role, t);
-      rows.push([r.staff,r.date,r.company,r.venue,r.role,r.role==="パントリー"?"－":t,
+      rows.push([r.staff,getMCCeremonySchedule(r).length===2?getMCCeremonyDateText(r):r.date,r.company,r.venue,r.role,r.role==="パントリー"?"－":t,
         pay,bill,bill,Math.round(bill*TAX_RATE)]);
     });
     downloadCSV(`MC出勤記録_${year}年${month}月.csv`,rows);
@@ -6090,19 +6135,21 @@ function MCAccountingView({ year, month, cfg }) {
         <div style={{overflowX:"auto"}}>
           <table style={{width:"100%",borderCollapse:"collapse"}}>
             <thead><tr style={{background:"#f8f9fb"}}>
-              <th style={TH}>スタッフ</th><th style={TH}>回数</th><th style={TH}>支払額</th>
+              <th style={TH}>スタッフ</th><th style={TH}>件数</th><th style={TH}>勤務日数</th><th style={TH}>支払額</th>
             </tr></thead>
             <tbody>
               {staffSummary.map(s=>(
                 <tr key={s.name}>
                   <td style={{...TD,fontWeight:700}}>{s.name}</td>
-                  <td style={{...TD,textAlign:"center"}}>{s.count}回</td>
+                  <td style={{...TD,textAlign:"center"}}>{s.count}件</td>
+                  <td style={{...TD,textAlign:"center",fontWeight:700}}>{s.days}日</td>
                   <td style={{...TD,textAlign:"right",fontWeight:800,color:C.blue}}>{yen(s.pay)}</td>
                 </tr>
               ))}
               <tr style={{background:"#f8f9fb"}}>
                 <td style={{...TD,fontWeight:800}}>合計</td>
-                <td style={{...TD,textAlign:"center",fontWeight:700}}>{staffSummary.reduce((a,s)=>a+s.count,0)}回</td>
+                <td style={{...TD,textAlign:"center",fontWeight:700}}>{staffSummary.reduce((a,s)=>a+s.count,0)}件</td>
+                <td style={{...TD,textAlign:"center",fontWeight:700}}>{staffSummary.reduce((a,s)=>a+s.days,0)}日</td>
                 <td style={{...TD,textAlign:"right",fontWeight:800,color:C.blue,fontSize:15}}>{yen(totalPay)}</td>
               </tr>
             </tbody>
@@ -6153,14 +6200,14 @@ function MCAccountingView({ year, month, cfg }) {
               <th style={TH}>役割</th><th style={TH}>種別</th>
             </tr></thead>
             <tbody>
-              {allRecords.sort((a,b)=>a.date>b.date?1:-1).map(r=>(
-                <tr key={r.id}>
-                  <td style={{...TD,fontWeight:600,whiteSpace:"nowrap"}}>{r.date}</td>
+              {allRecords.flatMap(r=>getMCCeremonySchedule(r).map(item=>({record:r,...item}))).sort((a,b)=>a.date>b.date?1:-1).map(({record:r,date,label,index,total})=>(
+                <tr key={`${r.id}-${index}`} style={{background:total===2?(index===1?"#faf5ff":"#fdfaff"):"#fff"}}>
+                  <td style={{...TD,fontWeight:600,whiteSpace:"nowrap"}}>{displayCalendarDate(date)}</td>
                   <td style={{...TD,fontWeight:600}}>{r.staff}</td>
                   <td style={TD}>{r.company}</td>
                   <td style={TD}>{r.venue}</td>
                   <td style={{...TD,fontWeight:600}}>{r.role}</td>
-                  <td style={{...TD,color:C.muted}}>{r.role==="パントリー"?"－":(r.type||"－")}</td>
+                  <td style={{...TD,color:C.muted}}>{r.role==="パントリー"?"－":<>{label}{total===2&&<span style={{display:"inline-block",marginLeft:5,background:"#ede9fe",color:C.purple,borderRadius:999,padding:"1px 6px",fontSize:10,fontWeight:800}}>2日間 {index}/2</span>}</>}</td>
                 </tr>
               ))}
             </tbody>
