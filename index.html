@@ -3350,25 +3350,23 @@ function VenueAtt({year,month,att,shifts,cfg,sv,flash}){
     const key=`${d}-${v.name}`,rec=att[key],sched=shifts[d]?.[v.name]||"";
     if(rec||sched)rows.push({d,venue:v.name,sched,rec,key});
   }
-  const [showAll,setShowAll]=useState(false);
-  const display=showAll?rows:rows.filter(r=>r.rec&&!r.rec.verified);
   const verify=key=>{sv.att({...att,[key]:{...att[key],verified:true,verifiedAt:new Date().toISOString()}});flash("✅ 承認しました");};
   return <div>
-    <div style={{...GC,display:"flex",gap:20,alignItems:"center"}}>
-      {[["未承認",rows.filter(r=>r.rec&&!r.rec.verified).length,C.red],
+    <div style={{...GC,display:"flex",gap:20,alignItems:"center",flexWrap:"wrap"}}>
+      {[["未入力",rows.filter(r=>!r.rec).length,C.amber],
+        ["承認待ち",rows.filter(r=>r.rec&&!r.rec.verified).length,C.red],
         ["承認済",rows.filter(r=>r.rec?.verified).length,C.green]].map(([l,v,c])=>(
         <div key={l} style={{textAlign:"center"}}><div style={{fontSize:24,fontWeight:800,color:c}}>{v}</div>
           <div style={{fontSize:11,color:C.muted}}>{l}</div></div>))}
-      <button onClick={()=>setShowAll(x=>!x)} style={{...Btn(C.bg,C.muted),border:`1px solid ${C.border}`,marginLeft:"auto",fontSize:12}}>{showAll?"未承認のみ":"全件表示"}</button>
     </div>
     <div style={{...GC,overflowX:"auto",padding:0}}>
-      {display.length===0&&<p style={{padding:24,textAlign:"center",color:C.muted,fontSize:13}}>未承認の記録はありません</p>}
-      {display.length>0&&<table style={{width:"100%",borderCollapse:"collapse",minWidth:440}}>
+      {rows.length===0&&<p style={{padding:24,textAlign:"center",color:C.muted,fontSize:13}}>この月の確定シフトはありません</p>}
+      {rows.length>0&&<table style={{width:"100%",borderCollapse:"collapse",minWidth:440}}>
         <thead><tr style={{background:"#f8f9fb"}}>
           <th style={TH}>日付</th><th style={TH}>曜</th><th style={TH}>会場</th>
           <th style={TH}>コンシェルジュ</th><th style={TH}>時間</th><th style={TH}>状態</th>
         </tr></thead>
-        <tbody>{display.map(({d,venue,sched,rec,key})=>{
+        <tbody>{rows.map(({d,venue,sched,rec,key})=>{
           const wdi=getWdayI(year,month,d);
           return <tr key={key} style={{background:rec?.verified?"#f0fdf4":"#fff"}}>
             <td style={{...TD,textAlign:"center",fontWeight:700}}>{month}/{d}</td>
