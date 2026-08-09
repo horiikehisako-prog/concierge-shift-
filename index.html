@@ -19,7 +19,7 @@ if(location.hostname==="horiikehisako-prog.github.io"){
 firebase.initializeApp({apiKey:"AIzaSyBpKNiDwL06_SI1z-oT2xB979A5gLIoM70",authDomain:"concierge-shift-prod.firebaseapp.com",databaseURL:"https://concierge-shift-prod-default-rtdb.asia-southeast1.firebasedatabase.app",projectId:"concierge-shift-prod",storageBucket:"concierge-shift-prod.firebasestorage.app",messagingSenderId:"561846878890",appId:"1:561846878890:web:ddb55b68d69a8b9d6d86d3"});
 const FIREBASE_DATABASE_REST_URL="https://concierge-shift-prod-default-rtdb.asia-southeast1.firebasedatabase.app";
 </script>
-<style>*{box-sizing:border-box;margin:0;padding:0;}body{font-family:'Hiragino Kaku Gothic ProN','Yu Gothic UI','Meiryo',sans-serif;}select,input,textarea,button{font-family:inherit;}@media print{body{background:#fff!important;color:#111!important}.no-print{display:none!important}.print-card{box-shadow:none!important;border:1px solid #ddd!important;background:#fff!important;break-inside:avoid}.print-table{font-size:10px!important}.print-table th,.print-table td{padding:4px 5px!important;border-color:#ccc!important}.print-title{font-size:18px!important;color:#111!important}@page{size:A4;margin:12mm}}</style>
+<style>*{box-sizing:border-box;margin:0;padding:0;}body{font-family:'Hiragino Kaku Gothic ProN','Yu Gothic UI','Meiryo',sans-serif;}#root{padding-bottom:78px;}select,input,textarea,button{font-family:inherit;}@media print{body{background:#fff!important;color:#111!important}#root{padding-bottom:0!important}.no-print{display:none!important}.print-card{box-shadow:none!important;border:1px solid #ddd!important;background:#fff!important;break-inside:avoid}.print-table{font-size:10px!important}.print-table th,.print-table td{padding:4px 5px!important;border-color:#ccc!important}.print-title{font-size:18px!important;color:#111!important}@page{size:A4;margin:12mm}}</style>
 </head>
 <body>
 <div id="root"></div>
@@ -6701,6 +6701,6 @@ function MCConfigTab({ cfg, sv }) {
 
 ReactDOM.createRoot(document.getElementById('root')).render(<App/>);
 </script>
-<div style="position:fixed;right:12px;bottom:8px;z-index:9999;font-size:12px;line-height:1.35;color:#92400e;background:#fffbeb;border:1px solid #f59e0b;border-radius:6px;padding:4px 8px;text-align:left;font-weight:800;">本番<br>Sprint 27<br>Build 20260730.82</div>
+<div aria-hidden="true" style="position:fixed;right:12px;bottom:max(8px,env(safe-area-inset-bottom));z-index:9999;pointer-events:none;opacity:.82;font-size:12px;line-height:1.35;color:#92400e;background:#fffbeb;border:1px solid #f59e0b;border-radius:6px;padding:4px 8px;text-align:left;font-weight:800;">本番<br>Sprint 27<br>Build 20260730.82</div>
 </body>
 </html>
