@@ -431,10 +431,12 @@ const getConciergeAssignments = (shifts,d,cfg) => [
     key:`${d}-${EVENT_STAFF_KEY}-${slot.index}`,venueConfig:null,isEvent:true,index:slot.index
   }))
 ];
+const getActualAssignmentStaff = (assignment,rec) => String(rec?.staff||assignment?.staff||"").trim();
 const calcConciergePayroll = ({year,month,att,shifts,vconf,cfg,approvedOnly=false}) => {
   const days=getDays(year,month), rows=[];
   for(let d=1;d<=days;d++) for(const assignment of getConciergeAssignments(shifts,d,cfg)){
-    const {staff,key,venue}=assignment, rec=att[key];
+    const {key,venue}=assignment, rec=att[key];
+    const staff=getActualAssignmentStaff(assignment,rec);
     if(approvedOnly && !rec?.verified) continue;
     const h=rec?parseHours(rec.start,rec.end,rec.breakMin??60):DEFAULT_HOURS;
     const rate=cfg.staffRates?.[staff]||RATE_STAFF;
@@ -2266,8 +2268,8 @@ function AdminAttView({year,month,att:attProp,shifts,vconf,cfg,sv}){
   const verify=key=>sv.att({...att,[key]:{...att[key],verified:true,verifiedAt:new Date().toISOString()}});
   const saveEdit=()=>{
     if(!ed)return;
-    const existing=att[ed.key]||{staff:ed.newStaff||"",submittedAt:new Date().toISOString()};
-    const newAtt={...att,[ed.key]:{...existing,start:ed.s,end:ed.e,breakMin:ed.b,venue:ed.venue||existing.venue,verified:false}};
+    const existing=att[ed.key]||{submittedAt:new Date().toISOString()};
+    const newAtt={...att,[ed.key]:{...existing,staff:ed.staff||existing.staff||"",start:ed.s,end:ed.e,breakMin:ed.b,venue:ed.venue||existing.venue,verified:false}};
     setLocalAtt(newAtt);
     sv.att(newAtt);
     setEd(null);
@@ -2311,20 +2313,20 @@ function AdminAttView({year,month,att:attProp,shifts,vconf,cfg,sv}){
           const isEd=ed?.key===key;
           return <React.Fragment key={key}>
             <tr style={{background:rec?.verified?"#f0fdf4":"#fff",cursor:rec?"pointer":"default"}}
-              onClick={()=>rec&&!isEd&&setEd({key,s:rec.start,e:rec.end,b:rec.breakMin??60,venue:venue})}>
+              onClick={()=>rec&&!isEd&&setEd({key,staff:rec.staff||sched,s:rec.start,e:rec.end,b:rec.breakMin??60,venue:venue})}>
               <td style={{...TD,textAlign:"center",fontWeight:700}}>{month}/{d}</td>
               <td style={{...TD,textAlign:"center",fontWeight:700,color:wdi===0?C.sun:wdi===6?C.sat:C.muted}}>{getWday(year,month,d)}</td>
               <td style={TD}>{venue}</td><td style={TD}>{sched||"-"}</td>
               <td style={{...TD,fontWeight:600}}>{rec?.staff||<span style={{color:C.muted,fontWeight:400}}>未入力</span>}</td>
               <td style={{...TD,color:C.muted}}>{rec?`${rec.start}〜${rec.end} 休憩${rec.breakMin??60}分（実働${h}h)`:"−"}</td>
               <td style={{...TD,textAlign:"center"}}>
-                {!rec&&<button onClick={e=>{e.stopPropagation();setEd({key,s:"09:00",e:"16:00",b:60,newStaff:sched,venue:venue});}} style={{...Btn(C.amber),fontSize:11,padding:"4px 8px"}}>入力</button>}
+                {!rec&&<button onClick={e=>{e.stopPropagation();setEd({key,staff:sched,s:"09:00",e:"16:00",b:60,venue:venue});}} style={{...Btn(C.amber),fontSize:11,padding:"4px 8px"}}>入力</button>}
                 {rec&&!rec.verified&&<div style={{display:"flex",gap:4,justifyContent:"center",flexWrap:"wrap"}}>
-                  <button onClick={e=>{e.stopPropagation();setEd({key,s:rec.start,e:rec.end,b:rec.breakMin??60,venue:venue});}} style={{...Btn(C.blue),fontSize:11,padding:"4px 8px"}}>修正</button>
+                  <button onClick={e=>{e.stopPropagation();setEd({key,staff:rec.staff||sched,s:rec.start,e:rec.end,b:rec.breakMin??60,venue:venue});}} style={{...Btn(C.blue),fontSize:11,padding:"4px 8px"}}>修正</button>
                   <button onClick={e=>{e.stopPropagation();verify(key);}} style={{...Btn(C.purple),fontSize:11,padding:"4px 8px"}}>承認</button>
                 </div>}
                 {rec?.verified&&<div style={{display:"flex",gap:4,justifyContent:"center",flexWrap:"wrap"}}>
-                  <button onClick={e=>{e.stopPropagation();setEd({key,s:rec.start,e:rec.end,b:rec.breakMin??60,venue:venue});}} style={{...Btn(C.muted),fontSize:11,padding:"4px 8px"}}>修正</button>
+                  <button onClick={e=>{e.stopPropagation();setEd({key,staff:rec.staff||sched,s:rec.start,e:rec.end,b:rec.breakMin??60,venue:venue});}} style={{...Btn(C.muted),fontSize:11,padding:"4px 8px"}}>修正</button>
                   <span style={{color:C.green,fontSize:12,fontWeight:700}}>✅</span>
                 </div>}
               </td>
@@ -2332,6 +2334,14 @@ function AdminAttView({year,month,att:attProp,shifts,vconf,cfg,sv}){
             {isEd&&<tr><td colSpan={7} style={{padding:"12px 16px",background:"#f0f7ff",borderBottom:`2px solid ${C.blue}`}}>
               <div style={{display:"flex",gap:8,alignItems:"center",flexWrap:"wrap"}}>
                 <span style={{fontSize:12,fontWeight:700,color:C.blue}}>✏️ 編集中</span>
+                <label style={{fontSize:12}}>実際に働いた人</label>
+                <select value={ed.staff||""} onChange={e=>setEd(prev=>({...prev,staff:e.target.value}))}
+                  style={{border:`1px solid ${C.border}`,borderRadius:6,padding:"4px 8px",fontSize:13,minWidth:140}}>
+                  <option value="">選択してください</option>
+                  {Array.from(new Set([...(cfg.staff||[]),ed.staff].filter(Boolean))).map(name=>(
+                    <option key={name} value={name}>{name}</option>
+                  ))}
+                </select>
                 <label style={{fontSize:12}}>会場</label>
 <select value={ed.venue||venue} onChange={e=>{const v=e.target.value;setEd(prev=>({...prev,venue:v}));}}
   style={{border:`1px solid ${C.border}`,borderRadius:6,padding:"4px 8px",fontSize:13}}>
@@ -2351,7 +2361,8 @@ function AdminAttView({year,month,att:attProp,shifts,vconf,cfg,sv}){
                   {[0,15,30,45,60].map(m=><option key={m} value={m}>{m}分</option>)}
                 </select>
                 <span style={{fontSize:12,color:C.green,fontWeight:700}}>実働{parseHours(ed.s,ed.e,ed.b)}h</span>
-                <button onClick={saveEdit} style={{...Btn(C.green),fontSize:12,padding:"5px 12px"}}>保存</button>
+                <button onClick={saveEdit} disabled={!ed.staff}
+                  style={{...Btn(ed.staff?C.green:"#94a3b8"),fontSize:12,padding:"5px 12px"}}>保存</button>
                 <button onClick={()=>setEd(null)} style={{...Btn(C.muted),fontSize:12,padding:"5px 12px"}}>キャンセル</button>
               </div>
             </td></tr>}
@@ -2517,8 +2528,8 @@ function AccountingView({year,month,att,shifts,vconf,cfg}){
   const staffRows=staff.map(name=>{
     let totalDays=0,totalHours=0,totalOT=0;
     for(let d=1;d<=days;d++) for(const a of getConciergeAssignments(shifts,d,cfg)){
-      if(a.staff===name){
-        const rec=att[a.key];
+      const rec=att[a.key];
+      if(getActualAssignmentStaff(a,rec)===name){
         const h=rec?parseHours(rec.start,rec.end,rec.breakMin??60):DEFAULT_HOURS;
         const ot=Math.max(0,Math.round((h-OVERTIME_HOURS)*100)/100);
         totalDays++;totalHours+=h;totalOT+=ot;
@@ -2572,7 +2583,7 @@ function AccountingView({year,month,att,shifts,vconf,cfg}){
     const rows=[[`${year}年${month}月 出勤詳細`],[""],
       ["名前","日付","曜日","会場","開始","終了","休憩(分)","実働(h)","残業(h)","時給","支払額","承認"]];
     for(let d=1;d<=days;d++) for(const a of getConciergeAssignments(shifts,d,cfg)){
-      const sn=a.staff,rec=att[a.key];
+      const rec=att[a.key],sn=getActualAssignmentStaff(a,rec);
       const s=rec?.start||"09:00",e=rec?.end||"16:00",bm=rec?.breakMin??60,h=parseHours(s,e,bm);
       const ot=Math.max(0,Math.round((h-OVERTIME_HOURS)*100)/100);
       const rate=staffRates[sn]||RATE_STAFF;
@@ -2705,8 +2716,8 @@ function buildConciergeMonthlyRows({year,month,att,shifts,vconf,cfg,approvedOnly
   const days=getDays(year,month);
   const rows=[];
   for(let d=1;d<=days;d++) for(const a of getConciergeAssignments(shifts,d,cfg)){
-    const {staff}=a;
     const rec=att[a.key];
+    const staff=getActualAssignmentStaff(a,rec);
     if(approvedOnly && !rec?.verified) continue;
     const start=rec?.start||"09:00";
     const end=rec?.end||"16:00";
@@ -4986,8 +4997,8 @@ function AttendanceSummaryView({year,month,att,shifts,vconf,cfg}){
   const staffData=staff.map(name=>{
     const records=[];
     for(let d=1;d<=days;d++) for(const a of getConciergeAssignments(shifts,d,cfg)){
-      if(a.staff===name){
-        const rec=att[a.key];
+      const rec=att[a.key];
+      if(getActualAssignmentStaff(a,rec)===name){
         const aVenue=a.isEvent?a.venue:actualVenue(d,a.venue);
         const h=rec?parseHours(rec.start,rec.end,rec.breakMin??60):DEFAULT_HOURS;
         const ot=Math.max(0,Math.round((h-OVERTIME_HOURS)*100)/100);
@@ -5006,9 +5017,9 @@ function AttendanceSummaryView({year,month,att,shifts,vconf,cfg}){
   // 会場別データ
   const venueData={};
   for(let d=1;d<=days;d++) for(const a of getConciergeAssignments(shifts,d,cfg)){
-    const sn=a.staff;
-    const aVenue=a.isEvent?a.venue:actualVenue(d,a.venue);
     const rec=att[a.key];
+    const sn=getActualAssignmentStaff(a,rec);
+    const aVenue=a.isEvent?a.venue:actualVenue(d,a.venue);
     const h=rec?parseHours(rec.start,rec.end,rec.breakMin??60):DEFAULT_HOURS;
     const billingVenue=normalizeBillingVenue(aVenue);if(!venueData[billingVenue]) venueData[billingVenue]=[];
     venueData[billingVenue].push({d,staff:sn,start:rec?.start||"09:00",end:rec?.end||"16:00",hours:h,verified:!!rec?.verified,input:!!rec});
@@ -5148,9 +5159,9 @@ function PrintableSheet({year,month,shifts,att,vconf,cfg}){
   for(let d=1;d<=days;d++){
     const slots=[];
     for(const a of getConciergeAssignments(shifts,d,cfg)){
-      const sn=a.staff;
+      const rec=att[a.key];
+      const sn=getActualAssignmentStaff(a,rec);
       if(sn){
-        const rec=att[a.key];
         const av=a.isEvent?a.venue:actualVenue(d,a.venue);
         const breakMin=rec?.breakMin??60;
         const h=rec?parseHours(rec.start,rec.end,breakMin):DEFAULT_HOURS;
