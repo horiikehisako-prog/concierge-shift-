@@ -406,18 +406,29 @@ const prefLabel = s => s || "未";
 const EVENT_STAFF_KEY = "__eventStaff";
 const EVENT_STAFF_LABEL = "イベント応援";
 const EVENT_STAFF_MAX = 2;
-const getEventStaff = (shifts,d) => {
-  const value=shifts?.[d]?.[EVENT_STAFF_KEY];
-  return (Array.isArray(value)?value:[]).slice(0,EVENT_STAFF_MAX).map(v=>String(v||"").trim()).filter(Boolean);
+const EVENT_EXTRA_VENUES = ["多治米","蔵王"];
+const getEventVenueOptions = cfg => Array.from(new Set([
+  ...(cfg?.venues||[]).map(v=>v.name),...EVENT_EXTRA_VENUES
+].filter(Boolean)));
+const normalizeEventSlot = (value,index=0) => {
+  if(value&&typeof value==="object"&&!Array.isArray(value)){
+    return {staff:String(value.staff||"").trim(),venue:String(value.venue||"").trim(),index};
+  }
+  return {staff:String(value||"").trim(),venue:"",index};
 };
+const getEventSlots = (shifts,d) => {
+  const values=Array.isArray(shifts?.[d]?.[EVENT_STAFF_KEY])?shifts[d][EVENT_STAFF_KEY]:[];
+  return Array.from({length:EVENT_STAFF_MAX},(_,index)=>normalizeEventSlot(values[index],index)).filter(slot=>slot.staff);
+};
+const getEventStaff = (shifts,d) => getEventSlots(shifts,d).map(slot=>slot.staff);
 const getConciergeAssignments = (shifts,d,cfg) => [
   ...cfg.venues.map(v=>({
     staff:shifts?.[d]?.[v.name]||"",venue:v.name,venueKey:v.name,
     key:`${d}-${v.name}`,venueConfig:v,isEvent:false
   })).filter(a=>a.staff),
-  ...getEventStaff(shifts,d).map((staff,index)=>({
-    staff,venue:EVENT_STAFF_LABEL,venueKey:EVENT_STAFF_KEY,
-    key:`${d}-${EVENT_STAFF_KEY}-${index}`,venueConfig:null,isEvent:true,index
+  ...getEventSlots(shifts,d).map(slot=>({
+    staff:slot.staff,venue:slot.venue||EVENT_STAFF_LABEL,venueKey:EVENT_STAFF_KEY,
+    key:`${d}-${EVENT_STAFF_KEY}-${slot.index}`,venueConfig:null,isEvent:true,index:slot.index
   }))
 ];
 const calcConciergePayroll = ({year,month,att,shifts,vconf,cfg,approvedOnly=false}) => {
@@ -1242,8 +1253,10 @@ function App(){
     const days=getDays(year,month);
     const ns={};
     for(let d=1;d<=days;d++){
-      const eventStaff=getEventStaff(D.shifts,d);
-      if(eventStaff.length)ns[d]={[EVENT_STAFF_KEY]:eventStaff};
+      const rawEvent=Array.isArray(D.shifts?.[d]?.[EVENT_STAFF_KEY])?D.shifts[d][EVENT_STAFF_KEY]:[];
+      const eventSlots=Array.from({length:EVENT_STAFF_MAX},(_,index)=>normalizeEventSlot(rawEvent[index],index));
+      while(eventSlots.length&&!eventSlots[eventSlots.length-1].staff&&!eventSlots[eventSlots.length-1].venue)eventSlots.pop();
+      if(eventSlots.some(slot=>slot.staff))ns[d]={[EVENT_STAFF_KEY]:eventSlots.map(({staff,venue})=>({staff,venue}))};
     }
     const totalCnt={}, venueCnt={};
     staff.forEach(s=>{totalCnt[s]=0;venueCnt[s]={};venues.forEach(v=>{venueCnt[s][v.name]=0;});});
@@ -1940,6 +1953,7 @@ function AIInboxView({cfg,compassKb,sv,flash}){
 function AdminPrefView({year,month,prefs,shifts,cfg,sv}){
   const days=getDays(year,month);
   const {staff,venues}=cfg;
+  const eventVenueOptions=getEventVenueOptions(cfg);
   const need=venues.length;
   const today=new Date();
   const deadlineMonth=month===1?12:month-1;
@@ -1959,12 +1973,12 @@ function AdminPrefView({year,month,prefs,shifts,cfg,sv}){
   const setAssignment=(d,venueName,staffName)=>{
     sv.shifts({...shifts,[d]:{...(shifts[d]||{}),[venueName]:staffName}});
   };
-  const setEventAssignment=(d,index,staffName)=>{
-    const next=Array.from({length:EVENT_STAFF_MAX},(_,i)=>(shifts[d]?.[EVENT_STAFF_KEY]||[])[i]||"");
-    next[index]=staffName;
-    while(next.length&&!next[next.length-1])next.pop();
+  const setEventAssignment=(d,index,field,value)=>{
+    const next=Array.from({length:EVENT_STAFF_MAX},(_,i)=>normalizeEventSlot((shifts[d]?.[EVENT_STAFF_KEY]||[])[i],i));
+    next[index]={...next[index],[field]:value};
+    while(next.length&&!next[next.length-1].staff&&!next[next.length-1].venue)next.pop();
     const day={...(shifts[d]||{})};
-    if(next.length)day[EVENT_STAFF_KEY]=next;else delete day[EVENT_STAFF_KEY];
+    if(next.length)day[EVENT_STAFF_KEY]=next.map(({staff,venue})=>({staff,venue}));else delete day[EVENT_STAFF_KEY];
     sv.shifts({...shifts,[d]:day});
   };
   const adminChoiceLabel=(name,d)=>{
@@ -2061,12 +2075,19 @@ function AdminPrefView({year,month,prefs,shifts,cfg,sv}){
               <div style={{borderTop:`1px dashed ${C.border}`,paddingTop:5}}>
                 <div style={{fontSize:11,fontWeight:700,color:C.purple,marginBottom:4}}>イベント応援（必要な日だけ）</div>
                 {Array.from({length:EVENT_STAFF_MAX},(_,index)=>{
-                  const value=(shifts[d]?.[EVENT_STAFF_KEY]||[])[index]||"";
-                  return <select key={index} value={value} onChange={e=>setEventAssignment(d,index,e.target.value)}
-                    style={{width:"100%",border:`1px solid ${C.border}`,borderRadius:6,padding:"5px 6px",fontSize:12,background:"#fff",marginTop:index?4:0}}>
-                    <option value="">-- 追加{index+1} 未定 --</option>
-                    {staff.map(s=><option key={s} value={s}>{adminChoiceLabel(s,d)}</option>)}
-                  </select>;
+                  const slot=normalizeEventSlot((shifts[d]?.[EVENT_STAFF_KEY]||[])[index],index);
+                  return <div key={index} style={{display:"grid",gridTemplateColumns:"1fr 92px",gap:4,marginTop:index?5:0}}>
+                    <select value={slot.staff} onChange={e=>setEventAssignment(d,index,"staff",e.target.value)}
+                      style={{width:"100%",border:`1px solid ${C.border}`,borderRadius:6,padding:"5px 6px",fontSize:12,background:"#fff"}}>
+                      <option value="">-- 追加{index+1} 未定 --</option>
+                      {staff.map(s=><option key={s} value={s}>{adminChoiceLabel(s,d)}</option>)}
+                    </select>
+                    <select value={slot.venue} onChange={e=>setEventAssignment(d,index,"venue",e.target.value)} disabled={!slot.staff}
+                      style={{width:"100%",border:`1px solid ${slot.staff&&!slot.venue?C.amber:C.border}`,borderRadius:6,padding:"5px 4px",fontSize:12,background:slot.staff?"#fff":"#f1f5f9"}}>
+                      <option value="">会場</option>
+                      {eventVenueOptions.map(v=><option key={v} value={v}>{v}</option>)}
+                    </select>
+                  </div>;
                 })}
               </div>
             </div></td>
@@ -2086,6 +2107,7 @@ function AdminPrefView({year,month,prefs,shifts,cfg,sv}){
 function AdminShiftView({year,month,shifts,prefs,vconf,cfg,sv,generate}){
   const days=getDays(year,month);
   const {staff,venues}=cfg;
+  const eventVenueOptions=getEventVenueOptions(cfg);
   // ローカル編集バッファ（保存ボタン押すまで確定しない）
   const [local,setLocal]=useState(shifts);
   const [dirty,setDirty]=useState(false);
@@ -2107,13 +2129,13 @@ function AdminShiftView({year,month,shifts,prefs,vconf,cfg,sv,generate}){
     setLocal(prev=>({...prev,[d]:{...(prev[d]||{}),[vn]:v}}));
     setDirty(true);
   };
-  const setEventCell=(d,index,value)=>{
+  const setEventCell=(d,index,field,value)=>{
     setLocal(prev=>{
-      const next=Array.from({length:EVENT_STAFF_MAX},(_,i)=>(prev[d]?.[EVENT_STAFF_KEY]||[])[i]||"");
-      next[index]=value;
-      while(next.length&&!next[next.length-1])next.pop();
+      const next=Array.from({length:EVENT_STAFF_MAX},(_,i)=>normalizeEventSlot((prev[d]?.[EVENT_STAFF_KEY]||[])[i],i));
+      next[index]={...next[index],[field]:value};
+      while(next.length&&!next[next.length-1].staff&&!next[next.length-1].venue)next.pop();
       const day={...(prev[d]||{})};
-      if(next.length)day[EVENT_STAFF_KEY]=next;else delete day[EVENT_STAFF_KEY];
+      if(next.length)day[EVENT_STAFF_KEY]=next.map(({staff,venue})=>({staff,venue}));else delete day[EVENT_STAFF_KEY];
       return {...prev,[d]:day};
     });
     setDirty(true);
@@ -2162,7 +2184,7 @@ function AdminShiftView({year,month,shifts,prefs,vconf,cfg,sv,generate}){
         <thead><tr>
           <th style={{...TH,width:32}}>日</th><th style={{...TH,width:26}}>曜</th>
           {venues.map(v=><th key={v.name} style={TH}>{v.name}</th>)}
-          <th style={{...TH,minWidth:190}}>イベント応援（追加2名）</th>
+          <th style={{...TH,minWidth:270}}>イベント応援（担当者・会場）</th>
         </tr></thead>
         <tbody>{Array.from({length:days},(_,i)=>i+1).map(d=>{
           const wdi=getWdayI(year,month,d);
@@ -2189,12 +2211,12 @@ function AdminShiftView({year,month,shifts,prefs,vconf,cfg,sv,generate}){
                 {notOpted&&<div style={{fontSize:10,color:C.amber}}>⚡ 希望外</div>}
               </td>;
             })}
-            <td style={{...TD,minWidth:190,background:getEventStaff(local,d).length?"#faf5ff":undefined}}>
+            <td style={{...TD,minWidth:270,background:getEventStaff(local,d).length?"#faf5ff":undefined}}>
               {Array.from({length:EVENT_STAFF_MAX},(_,index)=>{
-                const val=(local[d]?.[EVENT_STAFF_KEY]||[])[index]||"";
-                const notOpted=val&&!isAvailableStatus(prefStatus(prefs,val,d));
-                return <div key={index} style={{marginTop:index?5:0}}>
-                  <select value={val} onChange={e=>setEventCell(d,index,e.target.value)}
+                const slot=normalizeEventSlot((local[d]?.[EVENT_STAFF_KEY]||[])[index],index);
+                const notOpted=slot.staff&&!isAvailableStatus(prefStatus(prefs,slot.staff,d));
+                return <div key={index} style={{display:"grid",gridTemplateColumns:"1fr 92px",gap:4,marginTop:index?5:0}}>
+                  <select value={slot.staff} onChange={e=>setEventCell(d,index,"staff",e.target.value)}
                     style={{width:"100%",border:`1px solid ${notOpted?C.amber:C.border}`,borderRadius:6,padding:"4px 6px",fontSize:12,background:"#fff"}}>
                     <option value="">-- 追加{index+1} 未定 --</option>
                     {staff.map(s=>{
@@ -2203,7 +2225,12 @@ function AdminShiftView({year,month,shifts,prefs,vconf,cfg,sv,generate}){
                       return <option key={s} value={s}>{s}（{label}）</option>;
                     })}
                   </select>
-                  {notOpted&&<div style={{fontSize:10,color:C.amber}}>⚡ 希望外</div>}
+                  <select value={slot.venue} onChange={e=>setEventCell(d,index,"venue",e.target.value)} disabled={!slot.staff}
+                    style={{width:"100%",border:`1px solid ${slot.staff&&!slot.venue?C.amber:C.border}`,borderRadius:6,padding:"4px",fontSize:12,background:slot.staff?"#fff":"#f1f5f9"}}>
+                    <option value="">会場</option>
+                    {eventVenueOptions.map(v=><option key={v} value={v}>{v}</option>)}
+                  </select>
+                  {notOpted&&<div style={{gridColumn:"1 / -1",fontSize:10,color:C.amber}}>⚡ 希望外</div>}
                 </div>;
               })}
             </td>
@@ -2232,7 +2259,7 @@ function AdminAttView({year,month,att:attProp,shifts,vconf,cfg,sv}){
   };
   const allRows=[];
   for(let d=1;d<=days;d++) for(const a of getConciergeAssignments(shifts,d,cfg)){
-    const rec=att[a.key],venue=a.isEvent?EVENT_STAFF_LABEL:actualVenue(d,a.venue);
+    const rec=att[a.key],venue=a.isEvent?a.venue:actualVenue(d,a.venue);
     if(rec||a.staff)allRows.push({d,venue,venueKey:a.venueKey,sched:a.staff,rec,key:a.key});
   }
   const rows=venueFilter==="all"?allRows:allRows.filter(r=>r.venueKey===venueFilter);
@@ -2506,7 +2533,7 @@ function AccountingView({year,month,att,shifts,vconf,cfg}){
 
   const venueMap={};
   for(let d=1;d<=days;d++) for(const a of getConciergeAssignments(shifts,d,cfg)){
-    const aVenue=a.isEvent?EVENT_STAFF_LABEL:actualVenue(d,a.venue);
+    const aVenue=a.isEvent?a.venue:actualVenue(d,a.venue);
     const billingVenue=normalizeBillingVenue(aVenue);
     const rec=att[a.key];
     const h=rec?parseHours(rec.start,rec.end,rec.breakMin??60):DEFAULT_HOURS;
@@ -2549,7 +2576,7 @@ function AccountingView({year,month,att,shifts,vconf,cfg}){
       const s=rec?.start||"09:00",e=rec?.end||"16:00",bm=rec?.breakMin??60,h=parseHours(s,e,bm);
       const ot=Math.max(0,Math.round((h-OVERTIME_HOURS)*100)/100);
       const rate=staffRates[sn]||RATE_STAFF;
-      rows.push([sn,`${year}/${month}/${d}`,getWday(year,month,d),a.isEvent?EVENT_STAFF_LABEL:actualVenue(d,a.venue),s,e,bm,h,ot,rate,Math.round(h*rate),rec?.verified?"承認済":"未承認"]);
+      rows.push([sn,`${year}/${month}/${d}`,getWday(year,month,d),a.isEvent?a.venue:actualVenue(d,a.venue),s,e,bm,h,ot,rate,Math.round(h*rate),rec?.verified?"承認済":"未承認"]);
     }
     downloadCSV(`出勤詳細_${year}年${month}月.csv`,rows);
   };
@@ -2688,7 +2715,7 @@ function buildConciergeMonthlyRows({year,month,att,shifts,vconf,cfg,approvedOnly
     const rate=(cfg.staffRates||{})[staff]||RATE_STAFF;
     rows.push({
       source:"concierge",date:`${year}/${month}/${d}`,d,staff,role:"Concierge",
-      client:"コンシェルジュ",location:a.isEvent?EVENT_STAFF_LABEL:actualMonthlyVenue(cfg,vconf,d,a.venue),
+      client:"コンシェルジュ",location:a.isEvent?a.venue:actualMonthlyVenue(cfg,vconf,d,a.venue),
       start,end,breakMin,hours,dailyCount:0,rate,amount:Math.round(hours*rate),
       status:rec?.verified?"承認済":rec?"未承認":"未入力",approved:!!rec?.verified
     });
@@ -2701,7 +2728,7 @@ function inferBillingCompanyFromVenue(cfg, venue){
   const clients=getClients(cfg);
   const found=clients.find(c=>c.label===name||ensureArray(c.venues).includes(name));
   if(found) return found.label;
-  if(["春日","花園","多治米","東手城","小さな蔵王","小さな多治米"].includes(name)) return "飛鳥会館";
+  if(["春日","花園","多治米","蔵王","東手城","小さな蔵王","小さな多治米"].includes(name)) return "飛鳥会館";
   if(["あしべの杜","追憶","府中","別邸"].includes(name)) return "あしべの杜";
   if(name.includes("ふかしな")) return "ふかしな葬祭";
   return "未設定";
@@ -3257,11 +3284,12 @@ function ShiftScheduleTable({year,month,shifts,vconf,cfg,uname="",printCopy=fals
                 </td>;
               })}
               {hasEventStaff&&<td style={{...TD,padding:"4px 6px"}}>
-                {getEventStaff(shifts,d).length===0?<span style={{color:"#ccc",fontSize:12}}>−</span>:
-                  getEventStaff(shifts,d).map((assigned,index)=>{
-                    const isMe=uname&&assigned===uname;
-                    return <div key={`${assigned}-${index}`} style={{background:isMe?C.greenL:"#faf5ff",border:isMe?`1px solid ${C.green}`:"1px solid transparent",borderRadius:7,padding:"3px 7px",marginTop:index?3:0}}>
-                      <div style={{fontWeight:700,fontSize:12,color:isMe?C.green:C.purple}}>{assigned}{isMe?" 👤":""}</div>
+                {getEventSlots(shifts,d).length===0?<span style={{color:"#ccc",fontSize:12}}>−</span>:
+                  getEventSlots(shifts,d).map(slot=>{
+                    const isMe=uname&&slot.staff===uname;
+                    return <div key={`${slot.staff}-${slot.index}`} style={{background:isMe?C.greenL:"#faf5ff",border:isMe?`1px solid ${C.green}`:"1px solid transparent",borderRadius:7,padding:"3px 7px",marginTop:slot.index?3:0}}>
+                      <div style={{fontWeight:700,fontSize:12,color:isMe?C.green:C.purple}}>{slot.staff}{isMe?" 👤":""}</div>
+                      <div style={{fontSize:10,color:C.muted,marginTop:1}}>📍 {slot.venue||"会場未設定"}</div>
                     </div>;
                   })}
               </td>}
@@ -4960,7 +4988,7 @@ function AttendanceSummaryView({year,month,att,shifts,vconf,cfg}){
     for(let d=1;d<=days;d++) for(const a of getConciergeAssignments(shifts,d,cfg)){
       if(a.staff===name){
         const rec=att[a.key];
-        const aVenue=a.isEvent?EVENT_STAFF_LABEL:actualVenue(d,a.venue);
+        const aVenue=a.isEvent?a.venue:actualVenue(d,a.venue);
         const h=rec?parseHours(rec.start,rec.end,rec.breakMin??60):DEFAULT_HOURS;
         const ot=Math.max(0,Math.round((h-OVERTIME_HOURS)*100)/100);
         records.push({
@@ -4979,7 +5007,7 @@ function AttendanceSummaryView({year,month,att,shifts,vconf,cfg}){
   const venueData={};
   for(let d=1;d<=days;d++) for(const a of getConciergeAssignments(shifts,d,cfg)){
     const sn=a.staff;
-    const aVenue=a.isEvent?EVENT_STAFF_LABEL:actualVenue(d,a.venue);
+    const aVenue=a.isEvent?a.venue:actualVenue(d,a.venue);
     const rec=att[a.key];
     const h=rec?parseHours(rec.start,rec.end,rec.breakMin??60):DEFAULT_HOURS;
     const billingVenue=normalizeBillingVenue(aVenue);if(!venueData[billingVenue]) venueData[billingVenue]=[];
@@ -5123,7 +5151,7 @@ function PrintableSheet({year,month,shifts,att,vconf,cfg}){
       const sn=a.staff;
       if(sn){
         const rec=att[a.key];
-        const av=a.isEvent?EVENT_STAFF_LABEL:actualVenue(d,a.venue);
+        const av=a.isEvent?a.venue:actualVenue(d,a.venue);
         const breakMin=rec?.breakMin??60;
         const h=rec?parseHours(rec.start,rec.end,breakMin):DEFAULT_HOURS;
         slots.push({staff:sn,venue:av,start:rec?.start||"9:00",end:rec?.end||"16:00",breakMin,hours:h,verified:!!rec?.verified});
