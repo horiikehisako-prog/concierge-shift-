@@ -406,9 +406,29 @@ const prefLabel = s => s || "未";
 const EVENT_STAFF_KEY = "__eventStaff";
 const EVENT_STAFF_LABEL = "イベント応援";
 const EVENT_STAFF_MAX = 2;
-const EVENT_EXTRA_VENUES = ["多治米","蔵王"];
+const ASUKA_VENUES = [
+  "東手城斎場",
+  "春日斎場",
+  "花園斎場",
+  "多治米北斎場",
+  "多治米斎場",
+  "蔵王斎場",
+];
+const ASUKA_VENUE_ALIASES = {
+  "東手城":"東手城斎場",
+  "春日":"春日斎場",
+  "花園":"花園斎場",
+  "多治米":"多治米斎場",
+  "小さな多治米":"多治米北斎場",
+  "小さなお葬式多治米":"多治米北斎場",
+  "蔵王":"蔵王斎場",
+  "小さな蔵王":"蔵王斎場",
+  "小さなお葬式蔵王":"蔵王斎場",
+};
+const normalizeAsukaVenueName = name => ASUKA_VENUE_ALIASES[String(name||"").trim()] || String(name||"").trim();
+const EVENT_EXTRA_VENUES = ASUKA_VENUES;
 const getEventVenueOptions = cfg => Array.from(new Set([
-  ...(cfg?.venues||[]).map(v=>v.name),...EVENT_EXTRA_VENUES
+  ...(cfg?.venues||[]).map(v=>normalizeAsukaVenueName(v.name)),...EVENT_EXTRA_VENUES
 ].filter(Boolean)));
 const normalizeEventSlot = (value,index=0) => {
   if(value&&typeof value==="object"&&!Array.isArray(value)){
@@ -2739,7 +2759,10 @@ function inferBillingCompanyFromVenue(cfg, venue){
   const clients=getClients(cfg);
   const found=clients.find(c=>c.label===name||ensureArray(c.venues).includes(name));
   if(found) return found.label;
-  if(["春日","花園","多治米","蔵王","東手城","小さな蔵王","小さな多治米"].includes(name)) return "飛鳥会館";
+  if([
+    ...ASUKA_VENUES,
+    "春日","花園","多治米","蔵王","東手城","小さな蔵王","小さな多治米","小さなお葬式蔵王","小さなお葬式多治米",
+  ].includes(name)) return "飛鳥会館";
   if(["あしべの杜","追憶","府中","別邸"].includes(name)) return "あしべの杜";
   if(name.includes("ふかしな")) return "ふかしな葬祭";
   return "未設定";
@@ -4820,14 +4843,15 @@ const AI_NARRATION_WARNING = "Compass AIが作成した文章は下書きです�
 
 
 const MC_COMPANIES = {
-  "飛鳥会館": ["東手城","春日","花園","多治米","小さな蔵王","小さな多治米"],
+  "飛鳥会館": ASUKA_VENUES,
   "あしべの杜": ["あしべの杜","追憶","府中","別邸"],
 };
 const MC_REMOVED_VENUES = {
-  "飛鳥会館": ["タスカニー"],
+  "飛鳥会館": ["タスカニー","東手城","春日","花園","多治米","蔵王","小さな蔵王","小さな多治米","小さなお葬式蔵王","小さなお葬式多治米"],
   "あしべの杜": ["追憶の杜"],
 };
 const MC_VENUE_ALIASES = {
+  "飛鳥会館": ASUKA_VENUE_ALIASES,
   "あしべの杜": {"追憶の杜":"追憶"},
 };
 const MC_ROLES = ["司会","アシスタント","パントリー"];
