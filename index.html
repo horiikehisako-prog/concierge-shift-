@@ -2773,9 +2773,20 @@ function buildMCBillingRows(records,cfg){
 }
 
 function MonthlyInvoiceList(P){
-  const {year,month,cfg}=P;
+  const {year,month,cfg,shifts,att}=P;
   const {loading,records}=useMonthlyMCRecords(year,month,cfg);
-  const rows=[...buildConciergeBillingRows({...P,approvedOnly:true}),...buildMCBillingRows(records,cfg)]
+  const allConciergeRows=buildConciergeBillingRows({...P,approvedOnly:false});
+  const approvedConciergeRows=buildConciergeBillingRows({...P,approvedOnly:true});
+  const excludedConciergeRows=allConciergeRows.filter(r=>r.status!=="承認済");
+  const eventDayAudit=[];
+  for(let d=1;d<=getDays(year,month);d++){
+    const assignments=getConciergeAssignments(shifts,d,cfg);
+    const eventCount=assignments.filter(a=>a.isEvent).length;
+    if(!eventCount) continue;
+    const approvedCount=assignments.filter(a=>att[a.key]?.verified).length;
+    eventDayAudit.push({d,total:assignments.length,eventCount,approvedCount,pending:assignments.length-approvedCount});
+  }
+  const rows=[...approvedConciergeRows,...buildMCBillingRows(records,cfg)]
     .sort((a,b)=>String(a.company).localeCompare(String(b.company),"ja")||String(a.venue).localeCompare(String(b.venue),"ja")||(a.d-b.d));
   const companySummary=Object.values(rows.reduce((map,r)=>{
     const key=r.company||"未設定";
@@ -2819,7 +2830,21 @@ function MonthlyInvoiceList(P){
     <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(150px,1fr))",gap:10,marginBottom:14}}>
       <div style={{...GC,marginBottom:0,textAlign:"center"}}><div style={{fontSize:20,fontWeight:900,color:C.purple}}>{yen(total)}</div><div style={{fontSize:12,color:C.muted}}>請求合計(税込)</div></div>
       <div style={{...GC,marginBottom:0,textAlign:"center"}}><div style={{fontSize:20,fontWeight:900,color:C.blue}}>{rows.length}</div><div style={{fontSize:12,color:C.muted}}>明細件数</div></div>
+      <div style={{...GC,marginBottom:0,textAlign:"center"}}><div style={{fontSize:20,fontWeight:900,color:excludedConciergeRows.length?C.red:C.green}}>{excludedConciergeRows.length}</div><div style={{fontSize:12,color:C.muted}}>請求対象外（未入力・未承認）</div></div>
     </div>
+    {eventDayAudit.length>0&&<div className="no-print" style={{...GC,border:`1px solid ${C.amber}`,background:C.amberL}}>
+      <div style={{fontWeight:900,color:"#92400e",marginBottom:8}}>イベント日の人数確認</div>
+      <div style={{display:"flex",gap:8,flexWrap:"wrap"}}>{eventDayAudit.map(r=><div key={r.d}
+        style={{background:"#fff",border:`1px solid ${r.pending?C.red:C.green}`,borderRadius:8,padding:"8px 11px",fontSize:12}}>
+        <strong>{month}/{r.d}</strong>　シフト{r.total}名（追加{r.eventCount}名）　
+        <span style={{color:r.pending?C.red:C.green,fontWeight:900}}>承認済{r.approvedCount}名</span>
+        {r.pending>0&&<span style={{color:C.red,fontWeight:900}}>／未反映{r.pending}名</span>}
+      </div>)}</div>
+      <div style={{fontSize:12,color:"#92400e",marginTop:8}}>未反映がある日は、シフト管理で担当者を確認し、出勤記録で勤務時間を入力して承認してください。承認後、月次請求へ自動的に入ります。</div>
+    </div>}
+    {excludedConciergeRows.length>0&&<div className="no-print" style={{...GC,border:`1px solid ${C.red}`,background:C.redL,color:"#991b1b",fontSize:12,fontWeight:700}}>
+      コンシェルジュのうち{excludedConciergeRows.length}件は、出勤記録が未入力または未承認のため、現在の請求合計には含まれていません。
+    </div>}
     <div className="print-card" style={GC}>
       <h3 className="print-title" style={{margin:"0 0 12px",fontSize:16}}>会社ごとの請求合計 {year}年{month}月</h3>
       {loading&&<p style={{color:C.muted,fontSize:13}}>読み込み中...</p>}
