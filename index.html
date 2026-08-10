@@ -5347,7 +5347,7 @@ function PrintableSheet({year,month,shifts,att,vconf,cfg}){
     <div id="print-sheet" style={{background:"#fff",padding:"8px",fontFamily:"'MS Gothic','Hiragino Kaku Gothic ProN',monospace"}}>
       {/* ヘッダー */}
       <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:6}}>
-        <div style={{fontSize:14,fontWeight:700}}>春日斎場　出勤表</div>
+        <div style={{fontSize:14,fontWeight:700}}>コンシェルジュ　出勤表</div>
         <div style={{fontSize:14,fontWeight:700}}>{year}年 {month}月</div>
       </div>
 
@@ -5358,24 +5358,31 @@ function PrintableSheet({year,month,shifts,att,vconf,cfg}){
             <th style={{...PS.th,width:"5%"}}>日付</th>
             <th style={{...PS.th,width:"5%"}}>曜</th>
             <th style={{...PS.th,width:"10%"}}>名前</th>
-            <th style={{...PS.th,width:"15%"}}>動務場所</th>
-            <th style={{...PS.th,width:"13%"}}>動務時間</th>
+            <th style={{...PS.th,width:"15%"}}>勤務場所</th>
+            <th style={{...PS.th,width:"13%"}}>勤務時間</th>
             <th style={{...PS.th,width:"5%"}}>時間</th>
             <th style={{...PS.th,width:"10%"}}>名前</th>
-            <th style={{...PS.th,width:"15%"}}>動務場所</th>
-            <th style={{...PS.th,width:"13%"}}>動務時間</th>
+            <th style={{...PS.th,width:"15%"}}>勤務場所</th>
+            <th style={{...PS.th,width:"13%"}}>勤務時間</th>
             <th style={{...PS.th,width:"5%"}}>時間</th>
             <th style={{...PS.th,width:"9%"}}>押印</th>
           </tr>
         </thead>
         <tbody>
-          {rows.map(({d,wday,wdayI,slots})=>{
-            const s0=slots[0]||null;
-            const s1=slots[1]||null;
+          {rows.flatMap(({d,wday,wdayI,slots})=>{
+            const slotPairs=slots.length
+              ? Array.from({length:Math.ceil(slots.length/2)},(_,i)=>slots.slice(i*2,i*2+2))
+              : [[]];
             const wColor=wdayI===0?"#ff0000":wdayI===6?"#0000cc":"#000";
-            return <tr key={d} style={{borderBottom:"1px solid #ccc",minHeight:18}}>
-              <td style={{...PS.td,textAlign:"center",fontWeight:700}}>{d}</td>
-              <td style={{...PS.td,textAlign:"center",color:wColor,fontWeight:700}}>{wday}</td>
+            const verified=slots.some(s=>s?.verified);
+            return slotPairs.map((pair,pairIndex)=>{
+              const s0=pair[0]||null;
+              const s1=pair[1]||null;
+              return <tr key={`${d}-${pairIndex}`} style={{borderBottom:"1px solid #ccc",minHeight:18}}>
+              {pairIndex===0&&<>
+                <td rowSpan={slotPairs.length} style={{...PS.td,textAlign:"center",fontWeight:700}}>{d}</td>
+                <td rowSpan={slotPairs.length} style={{...PS.td,textAlign:"center",color:wColor,fontWeight:700}}>{wday}</td>
+              </>}
               {s0?<>
                 <td style={{...PS.td,fontWeight:600}}>{s0.staff}</td>
                 <td style={PS.td}>{s0.venue}</td>
@@ -5394,8 +5401,9 @@ function PrintableSheet({year,month,shifts,att,vconf,cfg}){
                 <td style={PS.td}></td><td style={PS.td}></td>
                 <td style={PS.td}></td><td style={PS.td}></td>
               </>}
-              <td style={{...PS.td,borderLeft:"2px solid #999"}}>{s0?.verified||s1?.verified?"✓":""}</td>
+              {pairIndex===0&&<td rowSpan={slotPairs.length} style={{...PS.td,borderLeft:"2px solid #999",textAlign:"center"}}>{verified?"✓":""}</td>}
             </tr>;
+            });
           })}
           {/* 空行（31日まで） */}
           {rows.length<31&&<tr style={{borderBottom:"1px solid #ccc"}}>
