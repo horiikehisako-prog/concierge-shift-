@@ -298,10 +298,19 @@ const normalizePrefsForStaff = (prefs,staff) => {
 const normalizeShiftsForStaff = (shifts,staff) => Object.fromEntries(
   Object.entries(shifts||{}).map(([day,venues])=>[
     day,
-    Object.fromEntries(Object.entries(venues||{}).map(([venue,name])=>[
-      venue,
-      name?canonicalStaffName(name,staff):name
-    ]))
+    Object.fromEntries(Object.entries(venues||{}).map(([venue,value])=>{
+      if(venue===EVENT_STAFF_KEY){
+        const slots=ensureArray(value).slice(0,EVENT_STAFF_MAX).map((slot,index)=>{
+          const normalized=normalizeEventSlot(slot,index);
+          return {
+            staff:normalized.staff?canonicalStaffName(normalized.staff,staff):"",
+            venue:normalized.venue,
+          };
+        });
+        return [venue,slots];
+      }
+      return [venue,value?canonicalStaffName(value,staff):value];
+    }))
   ])
 );
 const normalizeConciergeVenues = venues => {
@@ -1242,7 +1251,20 @@ function App(){
   useEffect(()=>{if(role) reload();},[reload,role]);
 
   const sv={
-    shifts:v=>{setD(d=>({...d,shifts:v}));stSave(`shift-${ym}`,v);flash("✅ シフトを保存しました");},
+    shifts:async v=>{
+      try{
+        await stSave(`shift-${ym}`,v);
+        const stored=await stLoad(`shift-${ym}`);
+        if(JSON.stringify(stored)!==JSON.stringify(v)) throw new Error("shift read-back mismatch");
+        setD(d=>({...d,shifts:v}));
+        flash("✅ シフトを保存しました");
+        return true;
+      }catch(e){
+        console.error("Shift save failed",e);
+        flash("❌ シフトを保存できませんでした。通信状態を確認して、もう一度保存してください");
+        return false;
+      }
+    },
     prefs: v=>{setD(d=>({...d,prefs:v})); stSave(`pref-${ym}`,v); flash("✅ 希望を保存しました");},
     att:   v=>{setD(d=>({...d,att:v}));   stSave(`att-${ym}`,v);  flash("✅ 出勤記録を保存しました");},
     vconf: v=>{setD(d=>({...d,vconf:v})); stSave(`vconf-${ym}`,v);},
@@ -2133,6 +2155,7 @@ function AdminShiftView({year,month,shifts,prefs,vconf,cfg,sv,generate}){
   // ローカル編集バッファ（保存ボタン押すまで確定しない）
   const [local,setLocal]=useState(shifts);
   const [dirty,setDirty]=useState(false);
+  const [saving,setSaving]=useState(false);
   useEffect(()=>{setLocal(shifts);setDirty(false);},[shifts]);
   const shortageAlerts=buildShortageAlerts({year,month,prefs,shifts:local||{},cfg});
   const hasEventStaff=Array.from({length:days},(_,i)=>getEventStaff(local,i+1).length>0).some(Boolean);
@@ -2162,15 +2185,21 @@ function AdminShiftView({year,month,shifts,prefs,vconf,cfg,sv,generate}){
     });
     setDirty(true);
   };
-  const saveNow=()=>{ sv.shifts(local); setDirty(false); };
+  const saveNow=async()=>{
+    if(saving) return;
+    setSaving(true);
+    const saved=await sv.shifts(local);
+    if(saved) setDirty(false);
+    setSaving(false);
+  };
   const onGenerate=()=>{ generate(); setDirty(false); };
   return <div>
     <style dangerouslySetInnerHTML={{__html:SHIFT_SCHEDULE_PRINT_STYLE}}/>
     <div style={{...GC,display:"flex",alignItems:"center",gap:12,flexWrap:"wrap"}}>
       <button style={Btn(C.blue)} onClick={onGenerate}>🔄 自動割り振り</button>
-      <button style={{...Btn(dirty?C.green:"#94a3b8"),fontSize:13,padding:"9px 18px"}}
-        onClick={saveNow} disabled={!dirty}>
-        {dirty?"💾 保存する":"✅ 保存済み"}
+      <button style={{...Btn(dirty&&!saving?C.green:"#94a3b8"),fontSize:13,padding:"9px 18px"}}
+        onClick={saveNow} disabled={!dirty||saving}>
+        {saving?"保存中…":dirty?"💾 保存する":"✅ 保存済み"}
       </button>
       <button className="shift-screen-only" onClick={()=>window.print()}
         style={{...Btn(C.navy),fontSize:13,padding:"9px 18px"}}>
