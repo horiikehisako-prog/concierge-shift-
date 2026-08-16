@@ -55,7 +55,7 @@ const STUDY_RATE = 3000;  // 勉強会費用（1時間）
 const DEFAULT_SUPPORT_PASS = "1234";
 const APP_NAME = "Compass";
 const APP_SUBTITLE = "仕事・成長・チームをつなぐ";
-const DEV_BUILD_LABEL = "Sprint 28 Build 20260817.2";
+const DEV_BUILD_LABEL = "Sprint 28 Build 20260817.3";
 const APP_ENV_LABEL = "本番";
 const SUPPORT_SKILL_GROUPS = [
   {id:"concierge", title:"コンシェルジュ業務", items:[
@@ -1694,7 +1694,7 @@ const employmentMoney=value=>`${Number(value||0).toLocaleString("ja-JP")}円`;
 const employmentValues=obj=>Object.values(obj||{}).filter(Boolean);
 const employmentParseSnapshot=json=>{try{return JSON.parse(json||"{}");}catch{return {};}};
 const employmentAccessFor=async user=>user?(await firebase.database().ref(`/access/${user.uid}`).get()).val():null;
-const EMPLOYMENT_ADMIN_EMAIL="horiike.hisako@gmail.com";
+const EMPLOYMENT_ADMIN_EMAIL="contract-admin@concierge-shift.example";
 const employmentStaffLoginEmail=staffId=>`${String(staffId||"").replace(/[^a-zA-Z0-9._-]/g,"_")}@staff.concierge-shift.example`;
 
 function EmploymentAuthGate({requiredRole,expectedStaffId,expectedStaffName,children}){
@@ -1705,6 +1705,7 @@ function EmploymentAuthGate({requiredRole,expectedStaffId,expectedStaffName,chil
   const [submitting,setSubmitting]=useState(false);
   const [notice,setNotice]=useState("");
   const loginEmail=requiredRole==="admin"?EMPLOYMENT_ADMIN_EMAIL:employmentStaffLoginEmail(expectedStaffId);
+  const passwordSetupKey=requiredRole==="admin"?"admin":expectedStaffId;
   const inspect=useCallback(async user=>{
     if(!user){setState({loading:false,user:null,access:null,error:"",mustSetPassword:false});return;}
     try{
@@ -1716,29 +1717,19 @@ function EmploymentAuthGate({requiredRole,expectedStaffId,expectedStaffName,chil
         setState({loading:false,user:null,access:null,error:requiredRole==="admin"?"管理者用パスワードを確認してください。":"選択したお名前とパスワードが一致しません。",mustSetPassword:false});
         return;
       }
-      const mustSetPassword=requiredRole==="staff"&&(await employmentRead(`passwordSetup/${expectedStaffId}`))===true;
+      const mustSetPassword=(await employmentRead(`passwordSetup/${passwordSetupKey}`))===true;
       setState({loading:false,user,access,error:"",mustSetPassword});
     }catch(e){
       await firebase.auth().signOut().catch(()=>{});
       setState({loading:false,user:null,access:null,error:"",mustSetPassword:false});
     }
-  },[requiredRole,expectedStaffId]);
+  },[requiredRole,expectedStaffId,passwordSetupKey]);
   useEffect(()=>firebase.auth().onAuthStateChanged(user=>inspect(user)),[inspect]);
   const login=async e=>{
     e.preventDefault();setSubmitting(true);setNotice("");
     try{const c=await firebase.auth().signInWithEmailAndPassword(loginEmail,password);await inspect(c.user);}
     catch(e){setState(s=>({...s,loading:false,error:requiredRole==="admin"?"管理者用パスワードを確認してください。":"選択したお名前とパスワードを確認してください。"}));}
     finally{setSubmitting(false);}
-  };
-  const resetPassword=async()=>{
-    setSubmitting(true);setNotice("");
-    try{
-      await firebase.auth().sendPasswordResetEmail(EMPLOYMENT_ADMIN_EMAIL);
-      setState(s=>({...s,error:""}));
-      setNotice("パスワード設定用のメールを送りました。メール内の案内から新しいパスワードを設定してください。");
-    }catch(e){
-      setState(s=>({...s,error:"パスワード設定用メールを送れませんでした。しばらくしてから、もう一度お試しください。"}));
-    }finally{setSubmitting(false);}
   };
   const changeOwnPassword=async e=>{
     e.preventDefault();
@@ -1747,7 +1738,7 @@ function EmploymentAuthGate({requiredRole,expectedStaffId,expectedStaffName,chil
     setSubmitting(true);
     try{
       await state.user.updatePassword(newPassword);
-      await employmentRef(`passwordSetup/${expectedStaffId}`).set(false);
+      await employmentRef(`passwordSetup/${passwordSetupKey}`).set(false);
       setNewPassword("");setConfirmPassword("");setNotice("新しいパスワードを設定しました。");
       setState(s=>({...s,error:"",mustSetPassword:false}));
     }catch(e){setState(s=>({...s,error:"パスワードを変更できませんでした。いったんログアウトし、もう一度お試しください。"}));}
@@ -1757,7 +1748,7 @@ function EmploymentAuthGate({requiredRole,expectedStaffId,expectedStaffName,chil
   if(state.loading)return <div style={GC}>雇用・契約情報を確認しています…</div>;
   if(state.user&&state.mustSetPassword)return <div style={{...GC,maxWidth:460,margin:"20px auto"}}>
     <h3 style={{margin:"0 0 8px",fontSize:18,color:C.navy}}>🔑 最初のパスワード設定</h3>
-    <p style={{fontSize:13,lineHeight:1.7,color:C.muted}}>仮パスワードでの確認ができました。{expectedStaffName||"ご本人"}が今後使用するパスワードへ変更してください。</p>
+    <p style={{fontSize:13,lineHeight:1.7,color:C.muted}}>仮パスワードでの確認ができました。{requiredRole==="admin"?"管理者ご本人":expectedStaffName||"ご本人"}が今後使用するパスワードへ変更してください。</p>
     {state.error&&<div style={{background:C.redL,color:C.red,borderRadius:8,padding:10,fontSize:13,fontWeight:700,marginBottom:12}}>{state.error}</div>}
     <form onSubmit={changeOwnPassword}>
       <label style={{fontSize:12,fontWeight:800}}>新しいパスワード（6文字以上）</label>
@@ -1780,10 +1771,9 @@ function EmploymentAuthGate({requiredRole,expectedStaffId,expectedStaffName,chil
       <label style={{fontSize:12,fontWeight:800}}>パスワード</label>
       <input type="password" value={password} onChange={e=>setPassword(e.target.value)} autoComplete="current-password" style={{width:"100%",border:`1px solid ${C.border}`,borderRadius:8,padding:"11px 12px",fontSize:15,margin:"5px 0 14px"}}/>
       <button disabled={submitting} style={{...Btn(submitting?C.muted:C.navy),width:"100%",padding:12}}>{submitting?"確認中…":"契約情報を開く"}</button>
-      {requiredRole==="admin"&&<button type="button" disabled={submitting} onClick={resetPassword} style={{...Btn("#fff",C.navy),width:"100%",padding:11,marginTop:9,border:`1px solid ${C.border}`}}>初めての設定・パスワードを忘れた場合</button>}
     </form>
     <div style={{fontSize:12,lineHeight:1.7,color:C.muted,marginTop:14,paddingTop:12,borderTop:`1px solid ${C.border}`}}>
-      {requiredRole==="admin"?"メールアドレスの入力は不要です。管理者用パスワードだけで開けます。":"初回は管理者から伝えられた仮パスワードを入力してください。その後、ご自身のパスワードへ変更できます。忘れた場合は管理者へご確認ください。"}
+      {requiredRole==="admin"?"初回はお渡しした仮パスワードを入力してください。その場で、ご自身の新しいパスワードへ変更できます。メールの受信は必要ありません。":"初回は管理者から伝えられた仮パスワードを入力してください。その後、ご自身のパスワードへ変更できます。忘れた場合は管理者へご確認ください。"}
     </div>
   </div>;
 }
@@ -7173,6 +7163,6 @@ function MCConfigTab({ cfg, sv }) {
 
 ReactDOM.createRoot(document.getElementById('root')).render(<App/>);
 </script>
-<div aria-hidden="true" style="position:fixed;right:12px;bottom:max(8px,env(safe-area-inset-bottom));z-index:9999;pointer-events:none;opacity:.82;font-size:12px;line-height:1.35;color:#92400e;background:#fffbeb;border:1px solid #f59e0b;border-radius:6px;padding:4px 8px;text-align:left;font-weight:800;">本番<br>Sprint 28<br>Build 20260817.2</div>
+<div aria-hidden="true" style="position:fixed;right:12px;bottom:max(8px,env(safe-area-inset-bottom));z-index:9999;pointer-events:none;opacity:.82;font-size:12px;line-height:1.35;color:#92400e;background:#fffbeb;border:1px solid #f59e0b;border-radius:6px;padding:4px 8px;text-align:left;font-weight:800;">本番<br>Sprint 28<br>Build 20260817.3</div>
 </body>
 </html>
