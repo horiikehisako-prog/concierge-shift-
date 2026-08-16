@@ -55,7 +55,7 @@ const STUDY_RATE = 3000;  // 勉強会費用（1時間）
 const DEFAULT_SUPPORT_PASS = "1234";
 const APP_NAME = "Compass";
 const APP_SUBTITLE = "仕事・成長・チームをつなぐ";
-const DEV_BUILD_LABEL = "Sprint 28 Build 20260816.1";
+const DEV_BUILD_LABEL = "Sprint 28 Build 20260817.1";
 const APP_ENV_LABEL = "本番";
 const SUPPORT_SKILL_GROUPS = [
   {id:"concierge", title:"コンシェルジュ業務", items:[
@@ -1700,6 +1700,7 @@ function EmploymentAuthGate({requiredRole,expectedStaffId,children}){
   const [email,setEmail]=useState("");
   const [password,setPassword]=useState("");
   const [submitting,setSubmitting]=useState(false);
+  const [notice,setNotice]=useState("");
   const inspect=useCallback(async user=>{
     if(!user){setState({loading:false,user:null,access:null,error:""});return;}
     try{
@@ -1707,20 +1708,36 @@ function EmploymentAuthGate({requiredRole,expectedStaffId,children}){
       const roleOk=access?.enabled===true&&access?.role===requiredRole;
       const staffOk=requiredRole!=="staff"||access?.staffId===expectedStaffId;
       if(!roleOk||!staffOk){
-        setState({loading:false,user,access,error:requiredRole==="admin"?"契約管理者として登録されたアカウントではありません。":"選択したお名前とログインアカウントが一致しません。"});
+        await firebase.auth().signOut().catch(()=>{});
+        setState({loading:false,user:null,access:null,error:requiredRole==="admin"?"このメールアドレスは契約管理者として登録されていません。":"選択したお名前とログインアカウントが一致しません。"});
         return;
       }
       setState({loading:false,user,access,error:""});
-    }catch(e){setState({loading:false,user,access:null,error:"認証情報を確認できませんでした。"});}
+    }catch(e){
+      await firebase.auth().signOut().catch(()=>{});
+      setState({loading:false,user:null,access:null,error:""});
+    }
   },[requiredRole,expectedStaffId]);
   useEffect(()=>firebase.auth().onAuthStateChanged(user=>inspect(user)),[inspect]);
   const login=async e=>{
-    e.preventDefault();setSubmitting(true);
+    e.preventDefault();setSubmitting(true);setNotice("");
     try{const c=await firebase.auth().signInWithEmailAndPassword(email.trim(),password);await inspect(c.user);}
     catch(e){setState(s=>({...s,loading:false,error:"メールアドレスまたはパスワードを確認してください。"}));}
     finally{setSubmitting(false);}
   };
-  const signOut=async()=>{await firebase.auth().signOut();setEmail("");setPassword("");};
+  const resetPassword=async()=>{
+    const value=email.trim();
+    if(!value){setState(s=>({...s,error:"先にメールアドレスを入力してください。"}));return;}
+    setSubmitting(true);setNotice("");
+    try{
+      await firebase.auth().sendPasswordResetEmail(value);
+      setState(s=>({...s,error:""}));
+      setNotice("パスワード設定用のメールを送りました。メール内の案内から新しいパスワードを設定してください。");
+    }catch(e){
+      setState(s=>({...s,error:e?.code==="auth/user-not-found"?"このメールアドレスの契約用アカウントは、まだ登録されていません。":"パスワード設定用メールを送れませんでした。メールアドレスを確認してください。"}));
+    }finally{setSubmitting(false);}
+  };
+  const signOut=async()=>{await firebase.auth().signOut();setEmail("");setPassword("");setNotice("");};
   if(state.loading)return <div style={GC}>雇用・契約情報を確認しています…</div>;
   if(state.user&&state.access?.enabled===true&&state.access?.role===requiredRole&&(requiredRole!=="staff"||state.access.staffId===expectedStaffId)){
     return children({user:state.user,access:state.access,signOut});
@@ -1729,14 +1746,18 @@ function EmploymentAuthGate({requiredRole,expectedStaffId,children}){
     <h3 style={{margin:"0 0 8px",fontSize:18,color:C.navy}}>🔐 雇用・契約専用ログイン</h3>
     <p style={{fontSize:13,lineHeight:1.7,color:C.muted,marginBottom:16}}>契約情報を守るため、この画面だけ本人専用アカウントで確認します。シフト画面の利用方法は変わりません。</p>
     {state.error&&<div style={{background:C.redL,color:C.red,borderRadius:8,padding:10,fontSize:13,fontWeight:700,marginBottom:12}}>{state.error}</div>}
-    {state.user?<button onClick={signOut} style={{...Btn(C.navy),width:"100%"}}>別のアカウントでログイン</button>:
+    {notice&&<div style={{background:C.greenL,color:C.green,borderRadius:8,padding:10,fontSize:13,fontWeight:700,marginBottom:12,lineHeight:1.6}}>{notice}</div>}
     <form onSubmit={login}>
       <label style={{fontSize:12,fontWeight:800}}>メールアドレス</label>
       <input type="email" value={email} onChange={e=>setEmail(e.target.value)} autoComplete="username" style={{width:"100%",border:`1px solid ${C.border}`,borderRadius:8,padding:"11px 12px",fontSize:15,margin:"5px 0 12px"}}/>
       <label style={{fontSize:12,fontWeight:800}}>パスワード</label>
       <input type="password" value={password} onChange={e=>setPassword(e.target.value)} autoComplete="current-password" style={{width:"100%",border:`1px solid ${C.border}`,borderRadius:8,padding:"11px 12px",fontSize:15,margin:"5px 0 14px"}}/>
       <button disabled={submitting} style={{...Btn(submitting?C.muted:C.navy),width:"100%",padding:12}}>{submitting?"確認中…":"契約情報を開く"}</button>
-    </form>}
+      <button type="button" disabled={submitting} onClick={resetPassword} style={{...Btn("#fff",C.navy),width:"100%",padding:11,marginTop:9,border:`1px solid ${C.border}`}}>初めての設定・パスワードを忘れた場合</button>
+    </form>
+    <div style={{fontSize:12,lineHeight:1.7,color:C.muted,marginTop:14,paddingTop:12,borderTop:`1px solid ${C.border}`}}>
+      {requiredRole==="admin"?"管理者用メールアドレスがまだ登録されていない場合は、最初の管理者アカウント登録が必要です。":"メールアドレスが分からない場合は、管理者へご確認ください。"}
+    </div>
   </div>;
 }
 
@@ -7125,6 +7146,6 @@ function MCConfigTab({ cfg, sv }) {
 
 ReactDOM.createRoot(document.getElementById('root')).render(<App/>);
 </script>
-<div aria-hidden="true" style="position:fixed;right:12px;bottom:max(8px,env(safe-area-inset-bottom));z-index:9999;pointer-events:none;opacity:.82;font-size:12px;line-height:1.35;color:#92400e;background:#fffbeb;border:1px solid #f59e0b;border-radius:6px;padding:4px 8px;text-align:left;font-weight:800;">本番<br>Sprint 28<br>Build 20260816.1</div>
+<div aria-hidden="true" style="position:fixed;right:12px;bottom:max(8px,env(safe-area-inset-bottom));z-index:9999;pointer-events:none;opacity:.82;font-size:12px;line-height:1.35;color:#92400e;background:#fffbeb;border:1px solid #f59e0b;border-radius:6px;padding:4px 8px;text-align:left;font-weight:800;">本番<br>Sprint 28<br>Build 20260817.1</div>
 </body>
 </html>
