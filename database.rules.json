@@ -10,6 +10,62 @@
       ".read": true,
       ".write": true
     },
+    "employment": {
+      "documents": {
+        ".read": "auth != null && root.child('access').child(auth.uid).child('role').val() === 'admin'",
+        ".write": "auth != null && root.child('access').child(auth.uid).child('role').val() === 'admin'"
+      },
+      "documentVersions": {
+        ".read": "auth != null && root.child('access').child(auth.uid).child('role').val() === 'admin'",
+        "$documentId": {
+          "$versionId": {
+            ".read": "auth != null && root.child('access').child(auth.uid).child('role').val() === 'admin'",
+            ".write": "auth != null && root.child('access').child(auth.uid).child('role').val() === 'admin' && (!data.exists() || data.child('status').val() !== 'published')",
+            ".validate": "newData.hasChildren(['id','documentId','versionLabel','body','status','createdAt']) && (newData.child('status').val() === 'draft' || newData.child('status').val() === 'published')"
+          }
+        }
+      },
+      "staffProfiles": {
+        ".read": "auth != null && root.child('access').child(auth.uid).child('role').val() === 'admin'",
+        "$staffId": {
+          ".read": "auth != null && (root.child('access').child(auth.uid).child('role').val() === 'admin' || (root.child('access').child(auth.uid).child('enabled').val() === true && root.child('access').child(auth.uid).child('staffId').val() === $staffId))",
+          ".write": "auth != null && root.child('access').child(auth.uid).child('role').val() === 'admin'"
+        }
+      },
+      "rateHistory": {
+        ".read": "auth != null && root.child('access').child(auth.uid).child('role').val() === 'admin'",
+        "$staffId": {
+          ".read": "auth != null && (root.child('access').child(auth.uid).child('role').val() === 'admin' || (root.child('access').child(auth.uid).child('enabled').val() === true && root.child('access').child(auth.uid).child('staffId').val() === $staffId))",
+          "$historyId": {
+            ".write": "auth != null && root.child('access').child(auth.uid).child('role').val() === 'admin' && !data.exists()",
+            ".validate": "newData.hasChildren(['id','effectiveDate','previousRate','newRate','changedAt'])"
+          }
+        }
+      },
+      "issues": {
+        ".read": "auth != null && root.child('access').child(auth.uid).child('role').val() === 'admin'",
+        "$staffId": {
+          ".read": "auth != null && (root.child('access').child(auth.uid).child('role').val() === 'admin' || (root.child('access').child(auth.uid).child('enabled').val() === true && root.child('access').child(auth.uid).child('staffId').val() === $staffId))",
+          "$issueId": {
+            ".write": "auth != null && root.child('access').child(auth.uid).child('role').val() === 'admin' && !data.exists()",
+            ".validate": "newData.hasChildren(['id','staffId','staffName','contractVersion','snapshotJson','hourlyRate','contractStartDate','issuedAt']) && newData.child('id').val() === $issueId && newData.child('staffId').val() === $staffId"
+          }
+        }
+      },
+      "agreements": {
+        ".read": "auth != null && root.child('access').child(auth.uid).child('role').val() === 'admin'",
+        "$staffId": {
+          ".read": "auth != null && (root.child('access').child(auth.uid).child('role').val() === 'admin' || (root.child('access').child(auth.uid).child('enabled').val() === true && root.child('access').child(auth.uid).child('staffId').val() === $staffId))",
+          "$agreementId": {
+            ".write": "auth != null && root.child('access').child(auth.uid).child('enabled').val() === true && root.child('access').child(auth.uid).child('staffId').val() === $staffId && !data.exists() && newData.child('issueId').val() === $agreementId && newData.child('staffId').val() === $staffId && newData.child('staffName').val() === root.child('employment').child('issues').child($staffId).child($agreementId).child('staffName').val() && newData.child('snapshotJson').val() === root.child('employment').child('issues').child($staffId).child($agreementId).child('snapshotJson').val() && newData.child('contractVersion').val() === root.child('employment').child('issues').child($staffId).child($agreementId).child('contractVersion').val() && newData.child('hourlyRate').val() === root.child('employment').child('issues').child($staffId).child($agreementId).child('hourlyRate').val() && newData.child('contractStartDate').val() === root.child('employment').child('issues').child($staffId).child($agreementId).child('contractStartDate').val() && newData.child('typedName').val() === root.child('employment').child('issues').child($staffId).child($agreementId).child('staffName').val() && newData.child('agreedAt').isNumber() && newData.child('agreedAt').val() <= now && newData.child('agreedAt').val() >= now - 300000"
+          }
+        }
+      },
+      "$other": {
+        ".read": false,
+        ".write": false
+      }
+    },
     "$other": {
       ".read": false,
       ".write": false
