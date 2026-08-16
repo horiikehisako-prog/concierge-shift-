@@ -32,6 +32,14 @@
           ".write": "auth != null && root.child('access').child(auth.uid).child('role').val() === 'admin'"
         }
       },
+      "passwordSetup": {
+        ".read": "auth != null && root.child('access').child(auth.uid).child('role').val() === 'admin'",
+        "$staffId": {
+          ".read": "auth != null && (root.child('access').child(auth.uid).child('role').val() === 'admin' || (root.child('access').child(auth.uid).child('enabled').val() === true && root.child('access').child(auth.uid).child('staffId').val() === $staffId))",
+          ".write": "auth != null && (root.child('access').child(auth.uid).child('role').val() === 'admin' || (root.child('access').child(auth.uid).child('enabled').val() === true && root.child('access').child(auth.uid).child('staffId').val() === $staffId && newData.val() === false))",
+          ".validate": "newData.isBoolean()"
+        }
+      },
       "rateHistory": {
         ".read": "auth != null && root.child('access').child(auth.uid).child('role').val() === 'admin'",
         "$staffId": {

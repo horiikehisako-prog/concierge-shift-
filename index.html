@@ -55,7 +55,7 @@ const STUDY_RATE = 3000;  // 勉強会費用（1時間）
 const DEFAULT_SUPPORT_PASS = "1234";
 const APP_NAME = "Compass";
 const APP_SUBTITLE = "仕事・成長・チームをつなぐ";
-const DEV_BUILD_LABEL = "Sprint 28 Build 20260817.1";
+const DEV_BUILD_LABEL = "Sprint 28 Build 20260817.2";
 const APP_ENV_LABEL = "本番";
 const SUPPORT_SKILL_GROUPS = [
   {id:"concierge", title:"コンシェルジュ業務", items:[
@@ -1694,69 +1694,96 @@ const employmentMoney=value=>`${Number(value||0).toLocaleString("ja-JP")}円`;
 const employmentValues=obj=>Object.values(obj||{}).filter(Boolean);
 const employmentParseSnapshot=json=>{try{return JSON.parse(json||"{}");}catch{return {};}};
 const employmentAccessFor=async user=>user?(await firebase.database().ref(`/access/${user.uid}`).get()).val():null;
+const EMPLOYMENT_ADMIN_EMAIL="horiike.hisako@gmail.com";
+const employmentStaffLoginEmail=staffId=>`${String(staffId||"").replace(/[^a-zA-Z0-9._-]/g,"_")}@staff.concierge-shift.example`;
 
-function EmploymentAuthGate({requiredRole,expectedStaffId,children}){
-  const [state,setState]=useState({loading:true,user:null,access:null,error:""});
-  const [email,setEmail]=useState("");
+function EmploymentAuthGate({requiredRole,expectedStaffId,expectedStaffName,children}){
+  const [state,setState]=useState({loading:true,user:null,access:null,error:"",mustSetPassword:false});
   const [password,setPassword]=useState("");
+  const [newPassword,setNewPassword]=useState("");
+  const [confirmPassword,setConfirmPassword]=useState("");
   const [submitting,setSubmitting]=useState(false);
   const [notice,setNotice]=useState("");
+  const loginEmail=requiredRole==="admin"?EMPLOYMENT_ADMIN_EMAIL:employmentStaffLoginEmail(expectedStaffId);
   const inspect=useCallback(async user=>{
-    if(!user){setState({loading:false,user:null,access:null,error:""});return;}
+    if(!user){setState({loading:false,user:null,access:null,error:"",mustSetPassword:false});return;}
     try{
       const access=await employmentAccessFor(user);
       const roleOk=access?.enabled===true&&access?.role===requiredRole;
       const staffOk=requiredRole!=="staff"||access?.staffId===expectedStaffId;
       if(!roleOk||!staffOk){
         await firebase.auth().signOut().catch(()=>{});
-        setState({loading:false,user:null,access:null,error:requiredRole==="admin"?"このメールアドレスは契約管理者として登録されていません。":"選択したお名前とログインアカウントが一致しません。"});
+        setState({loading:false,user:null,access:null,error:requiredRole==="admin"?"管理者用パスワードを確認してください。":"選択したお名前とパスワードが一致しません。",mustSetPassword:false});
         return;
       }
-      setState({loading:false,user,access,error:""});
+      const mustSetPassword=requiredRole==="staff"&&(await employmentRead(`passwordSetup/${expectedStaffId}`))===true;
+      setState({loading:false,user,access,error:"",mustSetPassword});
     }catch(e){
       await firebase.auth().signOut().catch(()=>{});
-      setState({loading:false,user:null,access:null,error:""});
+      setState({loading:false,user:null,access:null,error:"",mustSetPassword:false});
     }
   },[requiredRole,expectedStaffId]);
   useEffect(()=>firebase.auth().onAuthStateChanged(user=>inspect(user)),[inspect]);
   const login=async e=>{
     e.preventDefault();setSubmitting(true);setNotice("");
-    try{const c=await firebase.auth().signInWithEmailAndPassword(email.trim(),password);await inspect(c.user);}
-    catch(e){setState(s=>({...s,loading:false,error:"メールアドレスまたはパスワードを確認してください。"}));}
+    try{const c=await firebase.auth().signInWithEmailAndPassword(loginEmail,password);await inspect(c.user);}
+    catch(e){setState(s=>({...s,loading:false,error:requiredRole==="admin"?"管理者用パスワードを確認してください。":"選択したお名前とパスワードを確認してください。"}));}
     finally{setSubmitting(false);}
   };
   const resetPassword=async()=>{
-    const value=email.trim();
-    if(!value){setState(s=>({...s,error:"先にメールアドレスを入力してください。"}));return;}
     setSubmitting(true);setNotice("");
     try{
-      await firebase.auth().sendPasswordResetEmail(value);
+      await firebase.auth().sendPasswordResetEmail(EMPLOYMENT_ADMIN_EMAIL);
       setState(s=>({...s,error:""}));
       setNotice("パスワード設定用のメールを送りました。メール内の案内から新しいパスワードを設定してください。");
     }catch(e){
-      setState(s=>({...s,error:e?.code==="auth/user-not-found"?"このメールアドレスの契約用アカウントは、まだ登録されていません。":"パスワード設定用メールを送れませんでした。メールアドレスを確認してください。"}));
+      setState(s=>({...s,error:"パスワード設定用メールを送れませんでした。しばらくしてから、もう一度お試しください。"}));
     }finally{setSubmitting(false);}
   };
-  const signOut=async()=>{await firebase.auth().signOut();setEmail("");setPassword("");setNotice("");};
+  const changeOwnPassword=async e=>{
+    e.preventDefault();
+    if(newPassword.length<6){setState(s=>({...s,error:"新しいパスワードは6文字以上で入力してください。"}));return;}
+    if(newPassword!==confirmPassword){setState(s=>({...s,error:"確認用パスワードが一致しません。"}));return;}
+    setSubmitting(true);
+    try{
+      await state.user.updatePassword(newPassword);
+      await employmentRef(`passwordSetup/${expectedStaffId}`).set(false);
+      setNewPassword("");setConfirmPassword("");setNotice("新しいパスワードを設定しました。");
+      setState(s=>({...s,error:"",mustSetPassword:false}));
+    }catch(e){setState(s=>({...s,error:"パスワードを変更できませんでした。いったんログアウトし、もう一度お試しください。"}));}
+    finally{setSubmitting(false);}
+  };
+  const signOut=async()=>{await firebase.auth().signOut();setPassword("");setNewPassword("");setConfirmPassword("");setNotice("");};
   if(state.loading)return <div style={GC}>雇用・契約情報を確認しています…</div>;
+  if(state.user&&state.mustSetPassword)return <div style={{...GC,maxWidth:460,margin:"20px auto"}}>
+    <h3 style={{margin:"0 0 8px",fontSize:18,color:C.navy}}>🔑 最初のパスワード設定</h3>
+    <p style={{fontSize:13,lineHeight:1.7,color:C.muted}}>仮パスワードでの確認ができました。{expectedStaffName||"ご本人"}が今後使用するパスワードへ変更してください。</p>
+    {state.error&&<div style={{background:C.redL,color:C.red,borderRadius:8,padding:10,fontSize:13,fontWeight:700,marginBottom:12}}>{state.error}</div>}
+    <form onSubmit={changeOwnPassword}>
+      <label style={{fontSize:12,fontWeight:800}}>新しいパスワード（6文字以上）</label>
+      <input type="password" value={newPassword} onChange={e=>setNewPassword(e.target.value)} autoComplete="new-password" style={{width:"100%",border:`1px solid ${C.border}`,borderRadius:8,padding:"11px 12px",fontSize:15,margin:"5px 0 12px"}}/>
+      <label style={{fontSize:12,fontWeight:800}}>新しいパスワード（確認）</label>
+      <input type="password" value={confirmPassword} onChange={e=>setConfirmPassword(e.target.value)} autoComplete="new-password" style={{width:"100%",border:`1px solid ${C.border}`,borderRadius:8,padding:"11px 12px",fontSize:15,margin:"5px 0 14px"}}/>
+      <button disabled={submitting} style={{...Btn(submitting?C.muted:C.green),width:"100%",padding:12}}>{submitting?"設定中…":"このパスワードに変更する"}</button>
+    </form>
+  </div>;
   if(state.user&&state.access?.enabled===true&&state.access?.role===requiredRole&&(requiredRole!=="staff"||state.access.staffId===expectedStaffId)){
     return children({user:state.user,access:state.access,signOut});
   }
   return <div style={{...GC,maxWidth:460,margin:"20px auto"}}>
     <h3 style={{margin:"0 0 8px",fontSize:18,color:C.navy}}>🔐 雇用・契約専用ログイン</h3>
-    <p style={{fontSize:13,lineHeight:1.7,color:C.muted,marginBottom:16}}>契約情報を守るため、この画面だけ本人専用アカウントで確認します。シフト画面の利用方法は変わりません。</p>
+    <p style={{fontSize:13,lineHeight:1.7,color:C.muted,marginBottom:16}}>契約情報を守るため、この画面だけ本人専用パスワードで確認します。シフト画面の利用方法は変わりません。</p>
     {state.error&&<div style={{background:C.redL,color:C.red,borderRadius:8,padding:10,fontSize:13,fontWeight:700,marginBottom:12}}>{state.error}</div>}
     {notice&&<div style={{background:C.greenL,color:C.green,borderRadius:8,padding:10,fontSize:13,fontWeight:700,marginBottom:12,lineHeight:1.6}}>{notice}</div>}
     <form onSubmit={login}>
-      <label style={{fontSize:12,fontWeight:800}}>メールアドレス</label>
-      <input type="email" value={email} onChange={e=>setEmail(e.target.value)} autoComplete="username" style={{width:"100%",border:`1px solid ${C.border}`,borderRadius:8,padding:"11px 12px",fontSize:15,margin:"5px 0 12px"}}/>
+      {requiredRole==="staff"&&<div style={{background:C.blueL,borderRadius:8,padding:11,fontSize:14,fontWeight:800,marginBottom:12}}>お名前：{expectedStaffName||"選択したスタッフ"}</div>}
       <label style={{fontSize:12,fontWeight:800}}>パスワード</label>
       <input type="password" value={password} onChange={e=>setPassword(e.target.value)} autoComplete="current-password" style={{width:"100%",border:`1px solid ${C.border}`,borderRadius:8,padding:"11px 12px",fontSize:15,margin:"5px 0 14px"}}/>
       <button disabled={submitting} style={{...Btn(submitting?C.muted:C.navy),width:"100%",padding:12}}>{submitting?"確認中…":"契約情報を開く"}</button>
-      <button type="button" disabled={submitting} onClick={resetPassword} style={{...Btn("#fff",C.navy),width:"100%",padding:11,marginTop:9,border:`1px solid ${C.border}`}}>初めての設定・パスワードを忘れた場合</button>
+      {requiredRole==="admin"&&<button type="button" disabled={submitting} onClick={resetPassword} style={{...Btn("#fff",C.navy),width:"100%",padding:11,marginTop:9,border:`1px solid ${C.border}`}}>初めての設定・パスワードを忘れた場合</button>}
     </form>
     <div style={{fontSize:12,lineHeight:1.7,color:C.muted,marginTop:14,paddingTop:12,borderTop:`1px solid ${C.border}`}}>
-      {requiredRole==="admin"?"管理者用メールアドレスがまだ登録されていない場合は、最初の管理者アカウント登録が必要です。":"メールアドレスが分からない場合は、管理者へご確認ください。"}
+      {requiredRole==="admin"?"メールアドレスの入力は不要です。管理者用パスワードだけで開けます。":"初回は管理者から伝えられた仮パスワードを入力してください。その後、ご自身のパスワードへ変更できます。忘れた場合は管理者へご確認ください。"}
     </div>
   </div>;
 }
@@ -1805,7 +1832,7 @@ function EmploymentPrintSheet({issue,agreement}){
 
 function StaffEmploymentView({uname,cfg}){
   const staffId=employmentStaffId(uname);
-  return <EmploymentAuthGate requiredRole="staff" expectedStaffId={staffId}>
+  return <EmploymentAuthGate requiredRole="staff" expectedStaffId={staffId} expectedStaffName={uname}>
     {auth=><StaffEmploymentInner uname={uname} staffId={staffId} auth={auth} cfg={cfg}/>}
   </EmploymentAuthGate>;
 }
@@ -1927,11 +1954,10 @@ function EmploymentStaffManager({cfg,directory,data,selectedStaffId,setSelectedS
   const fallbackRate=cfg.staffRates?.[staff?.name]||0;
   const blankProfile={staffId:staff?.staffId||"",name:staff?.name||"",role:staff?.role||"",employmentType:"パートタイマー",contractStartDate:"",currentHourlyRate:fallbackRate,basicWorkHours:"",basicWorkplace:"",authUid:"",email:""};
   const [form,setForm]=useState({...blankProfile,...saved});
-  const [email,setEmail]=useState(saved.email||"");
   const [tempPassword,setTempPassword]=useState("");
   const [linkUid,setLinkUid]=useState(saved.authUid||"");
   const [selectedDocs,setSelectedDocs]=useState([]);
-  useEffect(()=>{const next=data.profiles?.[staff?.staffId]||{};const base={...blankProfile,staffId:staff?.staffId||"",name:staff?.name||"",role:staff?.role||"",currentHourlyRate:next.currentHourlyRate??(cfg.staffRates?.[staff?.name]||0)};setForm({...base,...next});setEmail(next.email||"");setLinkUid(next.authUid||"");},[staff?.staffId,JSON.stringify(saved)]);
+  useEffect(()=>{const next=data.profiles?.[staff?.staffId]||{};const base={...blankProfile,staffId:staff?.staffId||"",name:staff?.name||"",role:staff?.role||"",currentHourlyRate:next.currentHourlyRate??(cfg.staffRates?.[staff?.name]||0)};setForm({...base,...next});setLinkUid(next.authUid||"");setTempPassword("");},[staff?.staffId,JSON.stringify(saved)]);
   useEffect(()=>setSelectedDocs(documents.filter(d=>d.activeVersionId).map(d=>d.id)),[documents.map(d=>`${d.id}:${d.activeVersionId}`).join("|")]);
   if(!staff)return <div style={GC}>スタッフが登録されていません。</div>;
   const latestIssue=employmentValues(data.issues?.[staff.staffId]).sort((a,b)=>(b.issuedAt||0)-(a.issuedAt||0))[0];
@@ -1943,23 +1969,24 @@ function EmploymentStaffManager({cfg,directory,data,selectedStaffId,setSelectedS
     if(previous!==nextRate){const id=employmentMakeId("rate");updates[`employment/rateHistory/${staff.staffId}/${id}`]={id,effectiveDate:form.rateEffectiveDate||new Date().toISOString().slice(0,10),previousRate:previous,newRate:nextRate,changedAt:now,source:"manual",sourceRef:"contract-management"};}
     try{await firebase.database().ref("/").update(updates);setMessage("個別労働条件を保存しました。");await reload();}catch(e){console.error(e);setMessage("個別労働条件を保存できませんでした。");}
   };
-  const linkAccess=async(uidValue,emailValue=email)=>{
+  const linkAccess=async(uidValue)=>{
     const uid=String(uidValue||"").trim();if(!uid){setMessage("認証UIDを入力してください。");return;}
     try{
       const now=Date.now();
-      await firebase.database().ref("/").update({[`access/${uid}`]:{enabled:true,role:"staff",staffId:staff.staffId,displayName:staff.name,email:emailValue||"",updatedAt:now},[`employment/staffProfiles/${staff.staffId}/authUid`]:uid,[`employment/staffProfiles/${staff.staffId}/email`]:emailValue||"",[`employment/staffProfiles/${staff.staffId}/updatedAt`]:now});
+      await firebase.database().ref("/").update({[`access/${uid}`]:{enabled:true,role:"staff",staffId:staff.staffId,displayName:staff.name,updatedAt:now},[`employment/staffProfiles/${staff.staffId}/authUid`]:uid,[`employment/staffProfiles/${staff.staffId}/updatedAt`]:now,[`employment/passwordSetup/${staff.staffId}`]:true});
       setMessage(`${staff.name}さんの契約用アカウントを紐付けました。`);await reload();
     }catch(e){console.error(e);setMessage("契約用アカウントを紐付けできませんでした。");}
   };
   const createAccount=async()=>{
-    if(!email.trim()||tempPassword.length<6){setMessage("メールアドレスと6文字以上の仮パスワードを入力してください。");return;}
+    if(tempPassword.length<6){setMessage("6文字以上の仮パスワードを入力してください。");return;}
     let secondary;
     try{
+      const loginEmail=employmentStaffLoginEmail(staff.staffId);
       secondary=firebase.apps.find(a=>a.name==="employmentProvisioning")||firebase.initializeApp(FIREBASE_CONFIG,"employmentProvisioning");
-      const credential=await secondary.auth().createUserWithEmailAndPassword(email.trim(),tempPassword);
+      const credential=await secondary.auth().createUserWithEmailAndPassword(loginEmail,tempPassword);
       await secondary.auth().signOut();
-      await linkAccess(credential.user.uid,email.trim());setTempPassword("");
-    }catch(e){console.error(e);setMessage(e?.code?.includes("email-already-in-use")?"このメールアドレスは登録済みです。認証UIDで紐付けてください。":"契約用アカウントを作成できませんでした。");}
+      await linkAccess(credential.user.uid);setTempPassword("");
+    }catch(e){console.error(e);setMessage(e?.code?.includes("email-already-in-use")?"このスタッフの契約用アカウントは登録済みです。必要な場合は認証UIDを確認してください。":"契約用アカウントを作成できませんでした。");}
   };
   const issueContract=async()=>{
     const profile={...blankProfile,...saved,...form,staffId:staff.staffId,name:staff.name,role:staff.role,currentHourlyRate:Number(form.currentHourlyRate||0)};
@@ -1983,7 +2010,7 @@ function EmploymentStaffManager({cfg,directory,data,selectedStaffId,setSelectedS
     <div style={GC}><h3 style={{margin:"0 0 14px"}}>{staff.name}さんの個別条件</h3><div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(210px,1fr))",gap:12}}>
       {[['contractStartDate','契約開始日','date'],['employmentType','雇用形態','text'],['currentHourlyRate','現在の時給','number'],['rateEffectiveDate','時給適用日','date'],['basicWorkHours','基本勤務時間','text'],['basicWorkplace','基本就業場所','text']].map(([key,label,type])=><label key={key} style={{fontSize:12,fontWeight:800}}>{label}<input type={type} value={form[key]??""} onChange={e=>setForm({...form,[key]:e.target.value})} style={{display:"block",width:"100%",border:`1px solid ${C.border}`,borderRadius:8,padding:"10px 11px",fontSize:14,marginTop:5}}/></label>)}
     </div><button onClick={saveProfile} style={{...Btn(C.navy),marginTop:14}}>個別条件を保存</button></div>
-    <div style={GC}><h3 style={{margin:"0 0 12px"}}>契約用本人アカウント</h3><div style={{fontSize:12,color:C.muted,marginBottom:12}}>登録状況：{saved.authUid?`登録済み（${saved.email||saved.authUid}）`:"未登録"}</div><div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(200px,1fr))",gap:9}}><input type="email" value={email} onChange={e=>setEmail(e.target.value)} placeholder="スタッフのメールアドレス" style={{border:`1px solid ${C.border}`,borderRadius:8,padding:10}}/><input type="password" value={tempPassword} onChange={e=>setTempPassword(e.target.value)} placeholder="仮パスワード（6文字以上）" style={{border:`1px solid ${C.border}`,borderRadius:8,padding:10}}/></div><button onClick={createAccount} style={{...Btn(C.green),marginTop:10}}>新しい契約用アカウントを作成</button><details style={{marginTop:12}}><summary style={{cursor:"pointer",fontSize:12,color:C.muted}}>既存アカウントをUIDで紐付ける</summary><div style={{display:"flex",gap:8,marginTop:8,flexWrap:"wrap"}}><input value={linkUid} onChange={e=>setLinkUid(e.target.value)} placeholder="Firebase Authentication UID" style={{flex:1,minWidth:220,border:`1px solid ${C.border}`,borderRadius:8,padding:10}}/><button onClick={()=>linkAccess(linkUid)} style={Btn(C.navy)}>紐付ける</button></div></details></div>
+    <div style={GC}><h3 style={{margin:"0 0 12px"}}>契約用本人アカウント</h3><div style={{fontSize:12,color:C.muted,marginBottom:12}}>登録状況：{saved.authUid?"登録済み":"未登録"}</div><p style={{fontSize:12,lineHeight:1.7,color:C.muted}}>スタッフに伝える仮パスワードを設定してください。本人は最初のログイン後、自分だけのパスワードへ変更します。メールアドレスの入力は不要です。</p><input type="password" value={tempPassword} onChange={e=>setTempPassword(e.target.value)} placeholder="仮パスワード（6文字以上）" style={{width:"100%",maxWidth:420,border:`1px solid ${C.border}`,borderRadius:8,padding:10}}/><button onClick={createAccount} style={{...Btn(C.green),display:"block",marginTop:10}}>新しい契約用アカウントを作成</button><details style={{marginTop:12}}><summary style={{cursor:"pointer",fontSize:12,color:C.muted}}>既存アカウントをUIDで紐付ける</summary><div style={{display:"flex",gap:8,marginTop:8,flexWrap:"wrap"}}><input value={linkUid} onChange={e=>setLinkUid(e.target.value)} placeholder="Firebase Authentication UID" style={{flex:1,minWidth:220,border:`1px solid ${C.border}`,borderRadius:8,padding:10}}/><button onClick={()=>linkAccess(linkUid)} style={Btn(C.navy)}>紐付ける</button></div></details></div>
     <div style={GC}><h3 style={{margin:"0 0 12px"}}>契約書・規程を発行</h3>{documents.filter(d=>d.activeVersionId).map(d=><label key={d.id} style={{display:"flex",gap:8,alignItems:"center",fontSize:13,padding:"7px 0"}}><input type="checkbox" checked={selectedDocs.includes(d.id)} onChange={e=>setSelectedDocs(e.target.checked?[...selectedDocs,d.id]:selectedDocs.filter(id=>id!==d.id))}/>{d.title}（{data.versions?.[d.id]?.[d.activeVersionId]?.versionLabel||""}）</label>)}{!documents.some(d=>d.activeVersionId)&&<p style={{fontSize:13,color:C.muted}}>先に「文書・バージョン管理」で文書を公開してください。</p>}<button onClick={issueContract} style={{...Btn(C.amber),marginTop:10}}>選択した文書で新しい契約を発行</button>{latestIssue&&<div style={{fontSize:12,marginTop:10,color:latestAgreement?C.green:C.red,fontWeight:700}}>最新：{latestIssue.contractVersion} ／ {latestAgreement?`同意済み ${employmentFormatDateTime(latestAgreement.agreedAt)}`:"未同意"}</div>}</div>
     <div style={GC}><h3 style={{margin:"0 0 10px"}}>時給変更履歴</h3>{history.length?history.map(h=><div key={h.id} style={{borderBottom:`1px solid ${C.border}`,padding:"8px 0",fontSize:13}}>{h.effectiveDate}　{employmentMoney(h.previousRate)} → <b>{employmentMoney(h.newRate)}</b></div>):<div style={{fontSize:13,color:C.muted}}>変更履歴はありません。</div>}</div>
   </div>;
@@ -7146,6 +7173,6 @@ function MCConfigTab({ cfg, sv }) {
 
 ReactDOM.createRoot(document.getElementById('root')).render(<App/>);
 </script>
-<div aria-hidden="true" style="position:fixed;right:12px;bottom:max(8px,env(safe-area-inset-bottom));z-index:9999;pointer-events:none;opacity:.82;font-size:12px;line-height:1.35;color:#92400e;background:#fffbeb;border:1px solid #f59e0b;border-radius:6px;padding:4px 8px;text-align:left;font-weight:800;">本番<br>Sprint 28<br>Build 20260817.1</div>
+<div aria-hidden="true" style="position:fixed;right:12px;bottom:max(8px,env(safe-area-inset-bottom));z-index:9999;pointer-events:none;opacity:.82;font-size:12px;line-height:1.35;color:#92400e;background:#fffbeb;border:1px solid #f59e0b;border-radius:6px;padding:4px 8px;text-align:left;font-weight:800;">本番<br>Sprint 28<br>Build 20260817.2</div>
 </body>
 </html>
