@@ -55,7 +55,7 @@ const STUDY_RATE = 3000;  // 勉強会費用（1時間）
 const DEFAULT_SUPPORT_PASS = "1234";
 const APP_NAME = "Compass";
 const APP_SUBTITLE = "仕事・成長・チームをつなぐ";
-const DEV_BUILD_LABEL = "Sprint 28 Build 20260817.10";
+const DEV_BUILD_LABEL = "Sprint 28 Build 20260817.11";
 const APP_ENV_LABEL = "本番";
 const SUPPORT_SKILL_GROUPS = [
   {id:"concierge", title:"コンシェルジュ業務", items:[
@@ -4063,7 +4063,6 @@ function MCStaffView(P) {
   const tabs = [
     { id:"record", label:"📝 出勤を記録" },
     { id:"history",label:"📋 履歴確認" },
-    { id:"employment", label:"📄 雇用・契約" },
     ...(role==="mc"&&NARRATION_AI_PRODUCTION_ENABLED ? [{ id:"ai", label:"Compass AI" }] : []),
   ];
   return (
@@ -4082,7 +4081,6 @@ function MCStaffView(P) {
       )}
       {tab==="record"  && <MCStaffRecord  {...P} jobRole={jobRole}/>}
       {tab==="history" && <MCStaffHistory {...P} jobRole={jobRole}/>}
-      {tab==="employment" && <StaffEmploymentView {...P}/>}
       {NARRATION_AI_PRODUCTION_ENABLED&&tab==="ai"&&<CompassNarrationView {...P}/>}
     </div>
   );
@@ -7211,6 +7209,6 @@ function MCConfigTab({ cfg, sv }) {
 
 ReactDOM.createRoot(document.getElementById('root')).render(<App/>);
 </script>
-<div aria-hidden="true" style="position:fixed;right:12px;bottom:max(8px,env(safe-area-inset-bottom));z-index:9999;pointer-events:none;opacity:.82;font-size:12px;line-height:1.35;color:#92400e;background:#fffbeb;border:1px solid #f59e0b;border-radius:6px;padding:4px 8px;text-align:left;font-weight:800;">本番<br>Sprint 28<br>Build 20260817.10</div>
+<div aria-hidden="true" style="position:fixed;right:12px;bottom:max(8px,env(safe-area-inset-bottom));z-index:9999;pointer-events:none;opacity:.82;font-size:12px;line-height:1.35;color:#92400e;background:#fffbeb;border:1px solid #f59e0b;border-radius:6px;padding:4px 8px;text-align:left;font-weight:800;">本番<br>Sprint 28<br>Build 20260817.11</div>
 </body>
 </html>
