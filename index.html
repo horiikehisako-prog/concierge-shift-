@@ -55,7 +55,7 @@ const STUDY_RATE = 3000;  // 勉強会費用（1時間）
 const DEFAULT_SUPPORT_PASS = "1234";
 const APP_NAME = "Compass";
 const APP_SUBTITLE = "仕事・成長・チームをつなぐ";
-const DEV_BUILD_LABEL = "Sprint 28 Build 20260817.8";
+const DEV_BUILD_LABEL = "Sprint 28 Build 20260817.9";
 const APP_ENV_LABEL = "本番";
 const SUPPORT_SKILL_GROUPS = [
   {id:"concierge", title:"コンシェルジュ業務", items:[
@@ -1810,7 +1810,7 @@ function EmploymentPrintSheet({issue,agreement}){
   if(!issue)return null;
   const snapshot=employmentParseSnapshot(issue.snapshotJson);
   return <>
-    <style dangerouslySetInnerHTML={{__html:`@media print{body *{visibility:hidden!important}#employment-contract-print,#employment-contract-print *{visibility:visible!important}#employment-contract-print{position:absolute!important;left:0!important;top:0!important;width:100%!important;padding:8mm!important;background:#fff!important}.no-print{display:none!important}@page{size:A4 portrait;margin:10mm}}`}}/>
+    <style dangerouslySetInnerHTML={{__html:`#employment-contract-print{display:none}@media print{body *{visibility:hidden!important}#employment-contract-print,#employment-contract-print *{visibility:visible!important}#employment-contract-print{display:block!important;position:absolute!important;left:0!important;top:0!important;width:100%!important;padding:8mm!important;background:#fff!important}.no-print{display:none!important}@page{size:A4 portrait;margin:10mm}}`}}/>
     <div id="employment-contract-print" style={{background:"#fff",padding:20,color:"#222"}}>
       <div style={{textAlign:"center",borderBottom:"2px solid #333",paddingBottom:12,marginBottom:18}}>
         <div style={{fontSize:13}}>合同会社 atmark saki</div>
@@ -7208,6 +7208,6 @@ function MCConfigTab({ cfg, sv }) {
 
 ReactDOM.createRoot(document.getElementById('root')).render(<App/>);
 </script>
-<div aria-hidden="true" style="position:fixed;right:12px;bottom:max(8px,env(safe-area-inset-bottom));z-index:9999;pointer-events:none;opacity:.82;font-size:12px;line-height:1.35;color:#92400e;background:#fffbeb;border:1px solid #f59e0b;border-radius:6px;padding:4px 8px;text-align:left;font-weight:800;">本番<br>Sprint 28<br>Build 20260817.8</div>
+<div aria-hidden="true" style="position:fixed;right:12px;bottom:max(8px,env(safe-area-inset-bottom));z-index:9999;pointer-events:none;opacity:.82;font-size:12px;line-height:1.35;color:#92400e;background:#fffbeb;border:1px solid #f59e0b;border-radius:6px;padding:4px 8px;text-align:left;font-weight:800;">本番<br>Sprint 28<br>Build 20260817.9</div>
 </body>
 </html>
