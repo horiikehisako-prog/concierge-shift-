@@ -55,7 +55,7 @@ const STUDY_RATE = 3000;  // 勉強会費用（1時間）
 const DEFAULT_SUPPORT_PASS = "1234";
 const APP_NAME = "Compass";
 const APP_SUBTITLE = "仕事・成長・チームをつなぐ";
-const DEV_BUILD_LABEL = "Sprint 28 Build 20260817.6";
+const DEV_BUILD_LABEL = "Sprint 28 Build 20260817.7";
 const APP_ENV_LABEL = "本番";
 const SUPPORT_SKILL_GROUPS = [
   {id:"concierge", title:"コンシェルジュ業務", items:[
@@ -1957,10 +1957,12 @@ function EmploymentStaffManager({cfg,directory,data,selectedStaffId,setSelectedS
   const [accountMessage,setAccountMessage]=useState("");
   const [contractMessage,setContractMessage]=useState("");
   const [contractBusy,setContractBusy]=useState(false);
+  const [templatePreviewOpen,setTemplatePreviewOpen]=useState(false);
+  const [templatePreviewSnapshot,setTemplatePreviewSnapshot]=useState(null);
   const [previewOpen,setPreviewOpen]=useState(false);
   const [linkUid,setLinkUid]=useState(saved.authUid||"");
   const [selectedDocs,setSelectedDocs]=useState([]);
-  useEffect(()=>{const next=data.profiles?.[staff?.staffId]||{};const base={...blankProfile,staffId:staff?.staffId||"",name:staff?.name||"",role:staff?.role||"",currentHourlyRate:next.currentHourlyRate??(cfg.staffRates?.[staff?.name]||0)};setForm({...base,...next});setLinkUid(next.authUid||"");setTempPassword("");setAccountMessage("");setContractMessage("");setPreviewOpen(false);},[staff?.staffId,JSON.stringify(saved)]);
+  useEffect(()=>{const next=data.profiles?.[staff?.staffId]||{};const base={...blankProfile,staffId:staff?.staffId||"",name:staff?.name||"",role:staff?.role||"",currentHourlyRate:next.currentHourlyRate??(cfg.staffRates?.[staff?.name]||0)};setForm({...base,...next});setLinkUid(next.authUid||"");setTempPassword("");setAccountMessage("");setContractMessage("");setTemplatePreviewOpen(false);setTemplatePreviewSnapshot(null);setPreviewOpen(false);},[staff?.staffId,JSON.stringify(saved)]);
   useEffect(()=>setSelectedDocs(documents.filter(d=>d.activeVersionId).map(d=>d.id)),[documents.map(d=>`${d.id}:${d.activeVersionId}`).join("|")]);
   if(!staff)return <div style={GC}>スタッフが登録されていません。</div>;
   const latestIssue=employmentValues(data.issues?.[staff.staffId]).sort((a,b)=>(b.issuedAt||0)-(a.issuedAt||0))[0];
@@ -2000,6 +2002,22 @@ function EmploymentStaffManager({cfg,directory,data,selectedStaffId,setSelectedS
     const generated=Array.from(bytes,n=>chars[n%chars.length]).join("");
     setTempPassword(generated);setShowTempPassword(true);setAccountMessage("仮パスワードを作りました。内容を確認してから、下の作成ボタンを押してください。");
   };
+  const selectedSourceDocuments=()=>documents.filter(d=>selectedDocs.includes(d.id)&&d.activeVersionId).map(d=>{
+    const v=data.versions?.[d.id]?.[d.activeVersionId];return v?{documentId:d.id,versionId:v.id,title:d.title,type:d.type,versionLabel:v.versionLabel,body:v.body}:null;
+  }).filter(Boolean);
+  const previewContract=()=>{
+    const sourceDocuments=selectedSourceDocuments();
+    if(!sourceDocuments.length){setContractMessage("プレビューする公開済み文書にチェックを入れてください。");setTemplatePreviewOpen(false);return;}
+    const unset=value=>String(value??"").trim()||"未設定";
+    const profile={...blankProfile,...saved,...form,staffId:staff.staffId,name:staff.name,role:staff.role};
+    const contractVersion=sourceDocuments.map(d=>`${d.title} ${d.versionLabel}`).join(" / ");
+    const rate=Number(profile.currentHourlyRate||0);
+    const tokenValues={従業員氏名:unset(staff.name),契約開始日:unset(profile.contractStartDate),雇用形態:unset(profile.employmentType),基本時給:rate>0?rate.toLocaleString("ja-JP"):"未設定",基本勤務時間:unset(profile.basicWorkHours),基本就業場所:unset(profile.basicWorkplace),契約バージョン:unset(contractVersion),代表者氏名:"未設定",電子同意日時:"未設定"};
+    const chosen=sourceDocuments.map(doc=>({...doc,body:employmentReplaceTemplateTokens(doc.body,tokenValues)}));
+    setTemplatePreviewSnapshot({companyName:"合同会社 atmark saki",staffId:staff.staffId,staffName:staff.name,contractVersion,serviceRuleVersion:employmentServiceRuleVersion(chosen),conditions:{contractStartDate:unset(profile.contractStartDate),employmentType:unset(profile.employmentType),currentHourlyRate:rate>0?rate:"未設定",basicWorkHours:unset(profile.basicWorkHours),basicWorkplace:unset(profile.basicWorkplace)},documents:chosen,preview:true});
+    setTemplatePreviewOpen(true);setContractMessage("契約書のプレビューを表示しました。この操作では契約は発行・保存されません。");
+    setTimeout(()=>document.getElementById("employment-template-preview")?.scrollIntoView({behavior:"smooth",block:"start"}),0);
+  };
   const issueContract=async()=>{
     const profile={...blankProfile,...saved,...form,staffId:staff.staffId,name:staff.name,role:staff.role,currentHourlyRate:Number(form.currentHourlyRate||0)};
     const missing=[];
@@ -2009,9 +2027,7 @@ function EmploymentStaffManager({cfg,directory,data,selectedStaffId,setSelectedS
     if(!profile.basicWorkHours)missing.push("基本勤務時間");
     if(!profile.basicWorkplace)missing.push("基本就業場所");
     if(missing.length){setContractMessage(`まだ発行できません。上の個別条件で「${missing.join("・")}」を入力し、「個別条件を保存」を押してください。`);document.getElementById("employment-staff-detail")?.scrollIntoView({behavior:"smooth",block:"start"});return;}
-    const sourceDocuments=documents.filter(d=>selectedDocs.includes(d.id)&&d.activeVersionId).map(d=>{
-      const v=data.versions?.[d.id]?.[d.activeVersionId];return v?{documentId:d.id,versionId:v.id,title:d.title,type:d.type,versionLabel:v.versionLabel,body:v.body}:null;
-    }).filter(Boolean);
+    const sourceDocuments=selectedSourceDocuments();
     if(!sourceDocuments.length){setContractMessage("まだ発行できません。発行する公開済み文書にチェックを入れてください。");return;}
     const id=employmentMakeId("issue"),now=Date.now();
     const contractVersion=sourceDocuments.map(d=>`${d.title} ${d.versionLabel}`).join(" / ");
@@ -2034,7 +2050,7 @@ function EmploymentStaffManager({cfg,directory,data,selectedStaffId,setSelectedS
       {[['contractStartDate','契約開始日','date'],['employmentType','雇用形態','text'],['currentHourlyRate','現在の時給','number'],['rateEffectiveDate','時給適用日','date'],['basicWorkHours','基本勤務時間','text'],['basicWorkplace','基本就業場所','text']].map(([key,label,type])=><label key={key} style={{fontSize:12,fontWeight:800}}>{label}<input type={type} value={form[key]??""} onChange={e=>setForm({...form,[key]:e.target.value})} style={{display:"block",width:"100%",border:`1px solid ${C.border}`,borderRadius:8,padding:"10px 11px",fontSize:14,marginTop:5}}/></label>)}
     </div><button onClick={saveProfile} style={{...Btn(C.navy),marginTop:14}}>個別条件を保存</button></div>
     <div style={GC}><h3 style={{margin:"0 0 12px"}}>契約用本人アカウント</h3><div style={{fontSize:13,fontWeight:800,color:saved.authUid?C.green:C.red,marginBottom:12}}>登録状況：{saved.authUid?"登録済み":"未登録"}</div>{saved.authUid?<div style={{background:C.greenL,borderRadius:9,padding:"12px 14px",fontSize:13,lineHeight:1.7,fontWeight:700}}>本人アカウントは作成済みです。初回登録用の仮パスワード作成ボタンは、二重登録を防ぐため表示していません。本人は設定済みのパスワードでログインできます。</div>:<><p style={{fontSize:12,lineHeight:1.7,color:C.muted}}>スタッフへ渡す仮パスワードを作成します。本人は最初のログイン後、自分だけのパスワードへ変更します。メールアドレスの入力は不要です。</p>{accountMessage&&<div role="status" style={{background:accountMessage.includes("できません")?C.redL:C.blueL,borderRadius:8,padding:"10px 12px",fontSize:13,fontWeight:700,lineHeight:1.6,marginBottom:10}}>{accountMessage}</div>}<div style={{display:"flex",gap:8,flexWrap:"wrap",alignItems:"center"}}><input type={showTempPassword?"text":"password"} value={tempPassword} onChange={e=>setTempPassword(e.target.value)} disabled={accountBusy} placeholder="仮パスワード（6文字以上）" style={{width:"100%",maxWidth:420,border:`1px solid ${C.border}`,borderRadius:8,padding:10,fontSize:16}}/><button type="button" onClick={()=>setShowTempPassword(v=>!v)} style={{...Btn("#fff",C.navy),border:`1px solid ${C.border}`}}>{showTempPassword?"隠す":"表示"}</button></div><div style={{display:"flex",gap:8,flexWrap:"wrap",marginTop:10}}><button type="button" onClick={makeTempPassword} disabled={accountBusy} style={Btn(C.amber)}>仮パスワードを自動作成</button><button type="button" onClick={createAccount} disabled={accountBusy} style={Btn(accountBusy?C.muted:C.green)}>{accountBusy?"作成中…":"この仮パスワードでアカウントを作成"}</button></div></>}<details style={{marginTop:12}}><summary style={{cursor:"pointer",fontSize:12,color:C.muted}}>既存アカウントをUIDで紐付ける</summary><div style={{display:"flex",gap:8,marginTop:8,flexWrap:"wrap"}}><input value={linkUid} onChange={e=>setLinkUid(e.target.value)} placeholder="Firebase Authentication UID" style={{flex:1,minWidth:220,border:`1px solid ${C.border}`,borderRadius:8,padding:10}}/><button type="button" onClick={()=>linkAccess(linkUid)} style={Btn(C.navy)}>紐付ける</button></div></details></div>
-    <div style={GC}><h3 style={{margin:"0 0 12px"}}>契約書・規程を発行</h3>{documents.filter(d=>d.activeVersionId).map(d=><label key={d.id} style={{display:"flex",gap:8,alignItems:"center",fontSize:13,padding:"7px 0"}}><input type="checkbox" checked={selectedDocs.includes(d.id)} onChange={e=>{setSelectedDocs(e.target.checked?[...selectedDocs,d.id]:selectedDocs.filter(id=>id!==d.id));setContractMessage("");}}/>{d.title}（{data.versions?.[d.id]?.[d.activeVersionId]?.versionLabel||""}）</label>)}{!documents.some(d=>d.activeVersionId)&&<p style={{fontSize:13,color:C.muted}}>先に「文書・バージョン管理」で文書を公開してください。</p>}{contractMessage&&<div role="status" style={{background:contractMessage.includes("発行しました")?C.greenL:contractMessage.includes("発行しています")?C.blueL:C.redL,borderRadius:9,padding:"11px 13px",fontSize:13,fontWeight:800,lineHeight:1.7,marginTop:10}}>{contractMessage}</div>}<button type="button" onClick={issueContract} disabled={contractBusy} style={{...Btn(contractBusy?C.muted:C.amber),marginTop:10}}>{contractBusy?"発行中…":"選択した文書で新しい契約を発行"}</button><p style={{fontSize:12,lineHeight:1.7,color:C.muted,margin:"9px 0 0"}}>発行できない場合は、不足している項目をこの欄に表示します。</p>{latestIssue&&<div style={{marginTop:12}}><div style={{fontSize:12,color:latestAgreement?C.green:C.red,fontWeight:700}}>最新：{latestIssue.contractVersion} ／ {latestAgreement?`同意済み ${employmentFormatDateTime(latestAgreement.agreedAt)}`:"未同意"}</div><button type="button" onClick={()=>setPreviewOpen(v=>!v)} style={{...Btn(C.navy),marginTop:10}}>{previewOpen?"契約書を閉じる":"発行済み契約書を表示"}</button>{previewOpen&&<div style={{borderTop:`1px solid ${C.border}`,marginTop:14,paddingTop:14}}><EmploymentDocumentBody snapshot={employmentParseSnapshot(latestIssue.snapshotJson)} agreement={latestAgreement}/></div>}</div>}</div>
+    <div style={GC}><h3 style={{margin:"0 0 12px"}}>契約書・規程のプレビュー／正式発行</h3>{documents.filter(d=>d.activeVersionId).map(d=><label key={d.id} style={{display:"flex",gap:8,alignItems:"center",fontSize:13,padding:"7px 0"}}><input type="checkbox" checked={selectedDocs.includes(d.id)} onChange={e=>{setSelectedDocs(e.target.checked?[...selectedDocs,d.id]:selectedDocs.filter(id=>id!==d.id));setContractMessage("");setTemplatePreviewOpen(false);}}/>{d.title}（{data.versions?.[d.id]?.[d.activeVersionId]?.versionLabel||""}）</label>)}{!documents.some(d=>d.activeVersionId)&&<p style={{fontSize:13,color:C.muted}}>先に「文書・バージョン管理」で文書を公開してください。</p>}{contractMessage&&<div role="status" style={{background:contractMessage.includes("発行しました")?C.greenL:contractMessage.includes("発行しています")||contractMessage.includes("プレビューを表示")?C.blueL:C.redL,borderRadius:9,padding:"11px 13px",fontSize:13,fontWeight:800,lineHeight:1.7,marginTop:10}}>{contractMessage}</div>}<div style={{display:"flex",gap:10,flexWrap:"wrap",marginTop:10}}><button type="button" onClick={previewContract} style={Btn(C.navy)}>契約書をプレビュー</button><button type="button" onClick={issueContract} disabled={contractBusy} style={Btn(contractBusy?C.muted:C.amber)}>{contractBusy?"正式発行中…":"契約書を正式発行"}</button></div><p style={{fontSize:12,lineHeight:1.7,color:C.muted,margin:"9px 0 0"}}>プレビューは個別条件が未入力でも閲覧できます。必須項目の確認は正式発行時だけ行います。</p>{templatePreviewOpen&&templatePreviewSnapshot&&<div id="employment-template-preview" style={{borderTop:`2px solid ${C.navy}`,marginTop:16,paddingTop:14,scrollMarginTop:18}}><div style={{display:"flex",justifyContent:"space-between",gap:10,alignItems:"center",flexWrap:"wrap",marginBottom:10}}><div style={{fontSize:13,fontWeight:900,color:C.navy}}>発行前プレビュー（保存されません）</div><button type="button" onClick={()=>setTemplatePreviewOpen(false)} style={{...Btn("#fff",C.navy),border:`1px solid ${C.border}`}}>プレビューを閉じる</button></div><EmploymentDocumentBody snapshot={templatePreviewSnapshot} agreement={null}/></div>}{latestIssue&&<div style={{marginTop:16,borderTop:`1px solid ${C.border}`,paddingTop:12}}><div style={{fontSize:12,color:latestAgreement?C.green:C.red,fontWeight:700}}>最新の発行済み契約：{latestIssue.contractVersion} ／ {latestAgreement?`同意済み ${employmentFormatDateTime(latestAgreement.agreedAt)}`:"未同意"}</div><button type="button" onClick={()=>setPreviewOpen(v=>!v)} style={{...Btn(C.navy),marginTop:10}}>{previewOpen?"発行済み契約書を閉じる":"発行済み契約書を表示"}</button>{previewOpen&&<div style={{borderTop:`1px solid ${C.border}`,marginTop:14,paddingTop:14}}><EmploymentDocumentBody snapshot={employmentParseSnapshot(latestIssue.snapshotJson)} agreement={latestAgreement}/></div>}</div>}</div>
     <div style={GC}><h3 style={{margin:"0 0 10px"}}>時給変更履歴</h3>{history.length?history.map(h=><div key={h.id} style={{borderBottom:`1px solid ${C.border}`,padding:"8px 0",fontSize:13}}>{h.effectiveDate}　{employmentMoney(h.previousRate)} → <b>{employmentMoney(h.newRate)}</b></div>):<div style={{fontSize:13,color:C.muted}}>変更履歴はありません。</div>}</div>
   </div>;
 }
@@ -7197,6 +7213,6 @@ function MCConfigTab({ cfg, sv }) {
 
 ReactDOM.createRoot(document.getElementById('root')).render(<App/>);
 </script>
-<div aria-hidden="true" style="position:fixed;right:12px;bottom:max(8px,env(safe-area-inset-bottom));z-index:9999;pointer-events:none;opacity:.82;font-size:12px;line-height:1.35;color:#92400e;background:#fffbeb;border:1px solid #f59e0b;border-radius:6px;padding:4px 8px;text-align:left;font-weight:800;">本番<br>Sprint 28<br>Build 20260817.6</div>
+<div aria-hidden="true" style="position:fixed;right:12px;bottom:max(8px,env(safe-area-inset-bottom));z-index:9999;pointer-events:none;opacity:.82;font-size:12px;line-height:1.35;color:#92400e;background:#fffbeb;border:1px solid #f59e0b;border-radius:6px;padding:4px 8px;text-align:left;font-weight:800;">本番<br>Sprint 28<br>Build 20260817.7</div>
 </body>
 </html>
