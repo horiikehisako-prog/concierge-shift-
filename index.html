@@ -55,7 +55,7 @@ const STUDY_RATE = 3000;  // 勉強会費用（1時間）
 const DEFAULT_SUPPORT_PASS = "1234";
 const APP_NAME = "Compass";
 const APP_SUBTITLE = "仕事・成長・チームをつなぐ";
-const DEV_BUILD_LABEL = "Sprint 28 Build 20260819.2";
+const DEV_BUILD_LABEL = "Sprint 28 Build 20260819.3";
 const APP_ENV_LABEL = "本番";
 const SUPPORT_SKILL_GROUPS = [
   {id:"concierge", title:"コンシェルジュ業務", items:[
@@ -1198,6 +1198,7 @@ function App(){
     ashibeRates:raw.ashibeRates||{}, // あしべの杜単価
     itemSettings:normalizeItemSettings(raw.itemSettings),
     mcRatesV2:raw.mcRatesV2||{},
+    mcHourlyRates:raw.mcHourlyRates||{},
     seasonalIntros:{...DEFAULT_SEASONAL_INTROS,...(raw.seasonalIntros||{})},
     endingPhrases:ensureArray(raw.endingPhrases).length?ensureArray(raw.endingPhrases):DEFAULT_ENDING_PHRASES,
     compassDictionary:{...DEFAULT_COMPASS_DICTIONARY,...(raw.compassDictionary||{})},
@@ -2144,10 +2145,7 @@ function AdminDashboard({year,month,prefs,shifts,att,cfg}){
   const mcCount=mcRecords.filter(r=>r.role===MC_ROLES[0]).length;
   const assistantCount=mcRecords.filter(r=>r.role===MC_ROLES[1]).length;
   const pantryCount=mcRecords.filter(r=>r.role===MC_ROLES[2]).length;
-  const mcPayroll=mcRecords.reduce((sum,r)=>{
-    const key=getMCRateKey(r.company,r.role,r.type,r.training);
-    return sum + ((cfg.mcRates||{})[r.staff]?.[r.company]?.[key] || (cfg.mcRates||{})[r.staff]?.[r.company]?.[r.role] || 0);
-  },0);
+  const mcPayroll=mcRecords.reduce((sum,r)=>sum+getMCStaffPayment(cfg,r.staff,r),0);
   const shortageAlerts=buildShortageAlerts({year,month,prefs,shifts,cfg});
   const cards=[
     {label:"今月のコンシェルジュシフト",value:totalConciergeShifts,color:C.navy},
@@ -3383,13 +3381,17 @@ function MonthlyInvoiceList(P){
 }
 
 function normalizeMonthlyMCRecord(r,cfg){
-  const rate=getStaffPayRate(cfg,r.staff,r);
+  const payMode=getMCPayMode(r);
+  const isHourly=payMode==="hourly";
+  const rate=isHourly?getMCHourlyRate(cfg,r.staff,r):getStaffPayRate(cfg,r.staff,r);
+  const hours=isHourly?getMCRecordedHours(r):0;
+  const amount=getMCStaffPayment(cfg,r.staff,r);
   const schedule=getMCCeremonySchedule(r);
   const parts=String(schedule[0]?.date||r.date||"").split(/[/-]/).map(Number);
   return {
     source:"mc",date:schedule.length===2?getMCCeremonyDateText(r):(r.date||""),d:parts[2]||0,staff:r.staff,role:r.role||"",
-    client:r.company||"",location:r.venue||"",start:"",end:"",breakMin:"",
-    hours:0,dailyCount:1,workDays:schedule.length,rate,amount:rate,status:"登録済",approved:true,
+    client:r.company||"",location:r.venue||"",start:isHourly?(r.start||""):"",end:isHourly?(r.end||""):"",breakMin:isHourly?(r.breakMin??60):"",
+    hours,dailyCount:isHourly?0:1,workDays:schedule.length,rate,amount,payMode,status:"登録済",approved:true,
     note:r.training?"研修":(r.type||"")
   };
 }
@@ -3401,8 +3403,9 @@ function MonthlyPayrollList(P){
   const mcRows=records.map(r=>normalizeMonthlyMCRecord(r,cfg));
   const allRows=[...conciergeRows,...mcRows];
   const summary=Object.values(allRows.reduce((map,r)=>{
-    const key=`${r.staff}__${r.role}__${r.source}`;
-    if(!map[key]) map[key]={staff:r.staff,role:r.role,source:r.source,days:0,hours:0,dailyCount:0,rate:r.rate,amount:0};
+    const payMode=r.source==="concierge"?"hourly":(r.payMode||"perCase");
+    const key=`${r.staff}__${r.role}__${r.source}__${payMode}`;
+    if(!map[key]) map[key]={staff:r.staff,role:r.role,source:r.source,payMode,days:0,hours:0,dailyCount:0,rate:r.rate,amount:0};
     map[key].days+=r.workDays||1;
     map[key].hours+=r.hours||0;
     map[key].dailyCount+=r.dailyCount||0;
@@ -3414,9 +3417,9 @@ function MonthlyPayrollList(P){
 
   const exportCSV=()=>{
     const rows=[
-      ["支払先","勤務年月","区分","役割","勤務日数","実働時間","日数","単価","支払額","freee用メモ"],
+      ["支払先","勤務年月","区分","役割","勤務日数","実働時間","回数","単価","支払額","freee用メモ"],
       ...summary.map(r=>[
-        r.staff,`${year}-${p2(month)}`,r.source==="concierge"?"時給":"日給",r.role,
+        r.staff,`${year}-${p2(month)}`,r.payMode==="hourly"?"時給":"1回",r.role,
         r.days,r.hours,r.dailyCount,r.rate,r.amount,
         r.source==="concierge"?"承認済み勤怠のみ":"MC/アシスタント/パントリー登録実績"
       ]),
@@ -3444,13 +3447,13 @@ function MonthlyPayrollList(P){
         <table className="print-table" style={{width:"100%",borderCollapse:"collapse",minWidth:720}}>
           <thead><tr style={{background:"#f8f9fb"}}>
             <th style={TH}>スタッフ</th><th style={TH}>区分</th><th style={TH}>役割</th><th style={TH}>勤務日数</th>
-            <th style={TH}>実働時間</th><th style={TH}>日数</th><th style={TH}>単価</th><th style={TH}>支払額</th>
+            <th style={TH}>実働時間</th><th style={TH}>回数</th><th style={TH}>単価</th><th style={TH}>支払額</th>
           </tr></thead>
           <tbody>
             {summary.map(r=>(
-              <tr key={`${r.staff}-${r.role}-${r.source}`}>
+              <tr key={`${r.staff}-${r.role}-${r.source}-${r.payMode}`}>
                 <td style={{...TD,fontWeight:700}}>{r.staff}</td>
-                <td style={TD}>{r.source==="concierge"?"時給":"日給"}</td>
+                <td style={TD}>{r.payMode==="hourly"?"時給":"1回"}</td>
                 <td style={TD}>{r.role}</td>
                 <td style={{...TD,textAlign:"center"}}>{r.days}</td>
                 <td style={{...TD,textAlign:"center"}}>{r.hours?r.hours+"h":"-"}</td>
@@ -3492,7 +3495,7 @@ function MonthlyAttendanceList(P){
       ...filtered.map(r=>[
         r.date,r.d?getWday(year,month,r.d):"",r.staff,r.role,r.client,r.location,
         r.start,r.end,r.breakMin,r.hours||"",r.dailyCount||"",r.status,
-        r.source==="concierge"?"時給":"日給",r.rate,r.amount,r.note||""
+        (r.source==="concierge"||r.payMode==="hourly")?"時給":"1回",r.rate,r.amount,r.note||""
       ])
     ];
     downloadCSV(`monthly_attendance_${year}-${p2(month)}.csv`,rows);
@@ -3536,7 +3539,7 @@ function MonthlyAttendanceList(P){
                 <td style={TD}>{r.client}</td>
                 <td style={TD}>{r.location}</td>
                 <td style={{...TD,textAlign:"center",whiteSpace:"nowrap"}}>
-                  {r.source==="concierge"?`${r.start}-${r.end} / ${r.hours}h`:`${r.dailyCount}日`}
+                  {(r.source==="concierge"||r.payMode==="hourly")?`${r.start}-${r.end} / ${r.hours}h`:`${r.dailyCount}回`}
                 </td>
                 <td style={{...TD,textAlign:"center",color:r.status==="承認済"?C.green:r.status==="未承認"?C.amber:C.muted,fontWeight:700}}>
                   {r.status}
@@ -4141,7 +4144,7 @@ function MCStaffRecord({ year, month, uname, role, cfg, flash, shifts, att, vcon
   };
   const [form, setForm] = useState({
     company:"", venue:"", type:defaultType, assistRole:"アシスタント", training:false,
-    date:initialDate, funeralDate:addCalendarDays(initialDate,1),
+    date:initialDate, funeralDate:addCalendarDays(initialDate,1),start:"09:00",end:"16:00",breakMin:60,
   });
   const [saving, setSaving] = useState(false);
   const [showShiftPrint,setShowShiftPrint]=useState(false);
@@ -4150,21 +4153,30 @@ function MCStaffRecord({ year, month, uname, role, cfg, flash, shifts, att, vcon
 
   const rates = cfg.mcRates || {};
   const actualRole = jobRole==="アシスタント" ? form.assistRole : jobRole;
-  const myRate = getStaffPayRate(cfg,uname,{company:form.company,role:actualRole,type:form.type,training:form.training});
+  const payTarget={company:form.company,venue:form.venue,role:actualRole,type:form.type,training:form.training};
+  const hourlyRule=getMCHourlyRule(cfg,uname,payTarget);
+  const isHourly=!!hourlyRule;
+  const oneDayTypes=ceremonyTypes.filter(t=>normalizeCeremonyLabel(t)!==BOTH_CEREMONY_TYPE);
+  const effectiveType=isHourly&&normalizeCeremonyLabel(form.type)===BOTH_CEREMONY_TYPE?(oneDayTypes[0]||defaultType):form.type;
+  const myRate = isHourly?getMCHourlyRate(cfg,uname,payTarget):getStaffPayRate(cfg,uname,{...payTarget,type:effectiveType});
+  const workHours=isHourly?parseHours(form.start,form.end,form.breakMin):0;
+  const estimatedPay=isHourly?Math.round(workHours*myRate):myRate;
 
-  const reset = () => { setForm({company:"",venue:"",type:defaultType,assistRole:"アシスタント",training:false,date:initialDate,funeralDate:addCalendarDays(initialDate,1)}); };
+  const reset = () => { setForm({company:"",venue:"",type:defaultType,assistRole:"アシスタント",training:false,date:initialDate,funeralDate:addCalendarDays(initialDate,1),start:"09:00",end:"16:00",breakMin:60}); };
 
   const save = async () => {
     setSaving(true);
     const existing = await stLoad(storageKey) || [];
-    const isTwoDay=normalizeCeremonyLabel(form.type)===BOTH_CEREMONY_TYPE;
+    const isTwoDay=!isHourly&&normalizeCeremonyLabel(effectiveType)===BOTH_CEREMONY_TYPE;
     const newRec = {
       id: Date.now(), staff: uname, role: actualRole,
       company: form.company, venue: form.venue,
-      type: actualRole==="パントリー"?"－":form.type,
+      type: actualRole==="パントリー"?"－":effectiveType,
       date: displayCalendarDate(form.date),
       ...(isTwoDay?{wakeDate:displayCalendarDate(form.date),funeralDate:displayCalendarDate(form.funeralDate),twoDay:true}:{}),
       training: form.training,
+      payMode:isHourly?"hourly":"perCase",
+      ...(isHourly?{start:form.start,end:form.end,breakMin:Number(form.breakMin)||0,hours:workHours,hourlyRuleId:hourlyRule.id}:{}),
       createdAt: new Date().toISOString(),
     };
     await stSave(storageKey, [...existing, newRec]);
@@ -4174,11 +4186,11 @@ function MCStaffRecord({ year, month, uname, role, cfg, flash, shifts, att, vcon
   };
 
   const colors = { [clients[0]?.label||""]:"#e8784a", [clients[1]?.label||""]:"#6b8fb0" };
-  const isTwoDay=actualRole!=="パントリー"&&normalizeCeremonyLabel(form.type)===BOTH_CEREMONY_TYPE;
+  const isTwoDay=!isHourly&&actualRole!=="パントリー"&&normalizeCeremonyLabel(effectiveType)===BOTH_CEREMONY_TYPE;
   const hasValidTwoDayDates=!isTwoDay||(
     !!normalizeCalendarDate(form.funeralDate)&&normalizeCalendarDate(form.funeralDate)>normalizeCalendarDate(form.date)
   );
-  const canSave = form.venue && (actualRole==="パントリー" ? true : !!form.type) && hasValidTwoDayDates;
+  const canSave = form.venue && (actualRole==="パントリー" ? true : !!effectiveType) && hasValidTwoDayDates && (!isHourly||workHours>0);
 
   return (
     <div>
@@ -4273,12 +4285,12 @@ function MCStaffRecord({ year, month, uname, role, cfg, flash, shifts, att, vcon
         <div style={{marginBottom:16}}>
           <label style={{fontSize:12,color:C.muted,display:"block",marginBottom:8}}>📋 STEP 3　種別</label>
           <div style={{display:"flex",gap:8,flexWrap:"wrap"}}>
-            {ceremonyTypes.map(t=>(
+            {(isHourly?oneDayTypes:ceremonyTypes).map(t=>(
               <button key={t} onClick={()=>setForm({...form,type:t,...(normalizeCeremonyLabel(t)===BOTH_CEREMONY_TYPE?{funeralDate:form.funeralDate||addCalendarDays(form.date,1)}:{})})}
-                style={{flex:"1 1 100px",border:`2px solid ${form.type===t?C.purple:C.border}`,
+                style={{flex:"1 1 100px",border:`2px solid ${effectiveType===t?C.purple:C.border}`,
                   borderRadius:10,padding:"10px 6px",cursor:"pointer",fontSize:12,fontWeight:700,
-                  background:form.type===t?"#ede9fe":"#fff",
-                  color:form.type===t?C.purple:C.muted}}>
+                  background:effectiveType===t?"#ede9fe":"#fff",
+                  color:effectiveType===t?C.purple:C.muted}}>
                 {t}
               </button>
             ))}
@@ -4295,6 +4307,19 @@ function MCStaffRecord({ year, month, uname, role, cfg, flash, shifts, att, vcon
         </div>
       )}
 
+      {form.venue&&isHourly&&(
+        <div style={{marginBottom:16,background:"#ecfeff",border:`1px solid ${C.teal}`,borderRadius:12,padding:14}}>
+          <div style={{fontSize:13,fontWeight:800,color:C.teal,marginBottom:10}}>⏱️ 時給制　勤務時間を入力</div>
+          <div style={{display:"flex",gap:8,alignItems:"center",flexWrap:"wrap"}}>
+            <label style={{fontSize:12,fontWeight:700}}>開始<input type="time" value={form.start} onChange={e=>setForm({...form,start:e.target.value})} style={{display:"block",marginTop:4,border:`1px solid ${C.border}`,borderRadius:7,padding:"7px 9px",fontSize:14}}/></label>
+            <label style={{fontSize:12,fontWeight:700}}>終了<input type="time" value={form.end} onChange={e=>setForm({...form,end:e.target.value})} style={{display:"block",marginTop:4,border:`1px solid ${C.border}`,borderRadius:7,padding:"7px 9px",fontSize:14}}/></label>
+            <label style={{fontSize:12,fontWeight:700}}>休憩<select value={form.breakMin} onChange={e=>setForm({...form,breakMin:Number(e.target.value)})} style={{display:"block",marginTop:4,border:`1px solid ${C.border}`,borderRadius:7,padding:"7px 9px",fontSize:14}}>{[0,15,30,45,60,75,90].map(m=><option key={m} value={m}>{m}分</option>)}</select></label>
+            <div style={{fontSize:13,fontWeight:800,color:C.green,marginLeft:"auto"}}>実働 {workHours}時間</div>
+          </div>
+          <div style={{fontSize:11,color:C.muted,marginTop:8}}>時給制の勤務は、1日ごとに1件ずつ登録してください。</div>
+        </div>
+      )}
+
       {/* 確認・保存 */}
       {canSave && (
         <div style={{background:"#f8f0ff",borderRadius:12,padding:16,marginBottom:14}}>
@@ -4304,9 +4329,10 @@ function MCStaffRecord({ year, month, uname, role, cfg, flash, shifts, att, vcon
             ["会社",form.company],
             ["会場",form.venue],
             ["役割",actualRole],
-            ...(actualRole!=="パントリー"?[["種別",form.type]]:[]),
+            ...(actualRole!=="パントリー"?[["種別",effectiveType]]:[]),
+            ...(isHourly?[["支払区分","時給制"],["勤務時間",`${form.start}〜${form.end}（休憩${form.breakMin}分／実働${workHours}時間）`]]:[["支払区分","1回あたり"]]),
             ...(form.training?[["研修","🎓 研修単価適用"]]:
-               myRate>0?[["支払い単価",yen(myRate)]]:[[" ","（単価は管理者が設定します）"]]),
+               myRate>0?[[isHourly?"時給":"支払い単価",yen(myRate)],...(isHourly?[["支払予定額",yen(estimatedPay)]]:[])]:[[" ","（単価は管理者が設定します）"]]),
           ].map(([k,v])=>(
             <div key={k} style={{display:"flex",gap:8,marginBottom:4}}>
               <span style={{fontSize:12,color:C.muted,minWidth:64}}>{k}</span>
@@ -4346,7 +4372,7 @@ function MCStaffHistory({ year, month, uname, role, cfg }) {
     });
   },[year,month,uname,jobRole]);
 
-  const totalPay = records.reduce((a,r)=>a+getStaffPayRate(cfg,uname,r),0);
+  const totalPay = records.reduce((a,r)=>a+getMCStaffPayment(cfg,uname,r),0);
 
   if(loading) return <div style={{padding:40,textAlign:"center",color:C.muted}}>読み込み中…</div>;
 
@@ -4359,7 +4385,8 @@ function MCStaffHistory({ year, month, uname, role, cfg }) {
       </div>
       {records.length===0&&<p style={{color:C.muted,fontSize:13}}>この月の記録はありません</p>}
       {records.sort((a,b)=>a.date>b.date?1:-1).map(r=>{
-        const pay = getStaffPayRate(cfg,uname,r);
+        const pay = getMCStaffPayment(cfg,uname,r);
+        const isHourly=getMCPayMode(r)==="hourly";
         const schedule=getMCCeremonySchedule(r);
         const isTwoDay=schedule.length===2;
         return (
@@ -4371,6 +4398,7 @@ function MCStaffHistory({ year, month, uname, role, cfg }) {
                   {r.company}　{r.venue}
                   {jobRole==="司会"&&<span style={{marginLeft:6,color:C.purple,fontWeight:600}}>（{normalizeCeremonyLabel(r.type)}）</span>}
                   {isTwoDay&&<span style={{marginLeft:6,background:"#ede9fe",color:C.purple,borderRadius:999,padding:"2px 7px",fontWeight:800}}>2日間セット</span>}
+                  {isHourly&&<span style={{marginLeft:6,color:C.blue,fontWeight:700}}>時給　{r.start}-{r.end}／実働{getMCRecordedHours(r)}時間</span>}
                 </div>
               </div>
               {pay>0&&<span style={{color:C.green,fontWeight:700,fontSize:13}}>{yen(pay)}</span>}
@@ -5510,6 +5538,29 @@ function getStaffPayRate(cfg, staffName, rec){
   const legacyCol = MC_RATE_KEYS.find(k=>k.key===legacyDerived);
   return legacyCol ? 0 : 0;
 }
+const MC_HOURLY_RULES = [
+  {id:"fukashina-assistant",label:"ふかしな アシスタント",matches:(rec,profile)=>rec?.role==="アシスタント"&&(`${rec?.company||""} ${rec?.venue||""} ${profile?.workplace||""} ${profile?.location||""}`.includes("ふかしな"))},
+  {id:"ashibe-pantry",label:"あしべの杜 パントリー",matches:(rec,profile)=>rec?.role==="パントリー"&&(`${rec?.company||""} ${rec?.venue||""} ${profile?.workplace||""} ${profile?.location||""}`.includes("あしべ"))},
+];
+const getMCHourlyRule=(cfg,staffName,rec)=>{
+  if(rec?.training) return null;
+  const profile=ensureArray(cfg?.staffManagement).find(s=>s?.name===staffName)||null;
+  return MC_HOURLY_RULES.find(rule=>rule.matches(rec,profile))||null;
+};
+const getMCPayMode=rec=>rec?.payMode==="hourly"?"hourly":"perCase";
+const getMCHourlyRate=(cfg,staffName,rec)=>{
+  const rule=getMCHourlyRule(cfg,staffName,rec);
+  return rule?Number(cfg.mcHourlyRates?.[staffName]?.[rule.id]||0):0;
+};
+const getMCRecordedHours=rec=>{
+  if(Number(rec?.hours)>0) return Number(rec.hours);
+  if(rec?.start&&rec?.end) return parseHours(rec.start,rec.end,rec.breakMin??60);
+  return 0;
+};
+const getMCStaffPayment=(cfg,staffName,rec)=>{
+  if(getMCPayMode(rec)==="hourly") return Math.round(getMCRecordedHours(rec)*getMCHourlyRate(cfg,staffName,rec));
+  return getStaffPayRate(cfg,staffName,rec);
+};
 function moveItem(list,from,to){
   if(to<0||to>=list.length) return list;
   const n=[...list];
@@ -6748,10 +6799,7 @@ function MCAccountingView({ year, month, cfg }) {
   const staffSummary = staff.map(name => {
     const recs = allRecords.filter(r=>r.staff===name);
     let pay = 0;
-    recs.forEach(r => {
-      const rate = getStaffPayRate(cfg,name,r);
-      pay += rate;
-    });
+    recs.forEach(r => { pay += getMCStaffPayment(cfg,name,r); });
     const days=recs.reduce((sum,r)=>sum+getMCCeremonySchedule(r).length,0);
     return { name, count:recs.length, days, pay, recs };
   }).filter(s=>s.count>0);
@@ -6776,14 +6824,17 @@ function MCAccountingView({ year, month, cfg }) {
   const dlCSV = () => {
     const rows = [
       [`${year}年${month}月 司会・アシスタント出勤記録`],[``],
-      ["スタッフ","日付","会社","会場","役割","種別","支払単価(円)","請求単価(円)","請求額税抜","消費税"],
+      ["スタッフ","日付","会社","会場","役割","種別","支払区分","開始","終了","休憩分","実働時間","支払単価(円)","支払額(円)","請求単価(円)","請求額税抜","消費税"],
     ];
     allRecords.sort((a,b)=>a.date>b.date?1:-1).forEach(r=>{
-      const pay = getStaffPayRate(cfg,r.staff,r);
+      const isHourly=getMCPayMode(r)==="hourly";
+      const rate=isHourly?getMCHourlyRate(cfg,r.staff,r):getStaffPayRate(cfg,r.staff,r);
+      const pay = getMCStaffPayment(cfg,r.staff,r);
       const t   = normalizeCeremonyLabel(r.role==="パントリー"?(getCeremonyTypes(cfg)[0]?.label||"通夜"):(r.type||"通夜"));
       const bill= getBillingAmount(billing, r.company, r.role, t);
       rows.push([r.staff,getMCCeremonySchedule(r).length===2?getMCCeremonyDateText(r):r.date,r.company,r.venue,r.role,r.role==="パントリー"?"－":t,
-        pay,bill,bill,Math.round(bill*TAX_RATE)]);
+        isHourly?"時給":"1回",isHourly?r.start||"":"",isHourly?r.end||"":"",isHourly?r.breakMin??60:"",isHourly?getMCRecordedHours(r):"",
+        rate,pay,bill,bill,Math.round(bill*TAX_RATE)]);
     });
     downloadCSV(`MC出勤記録_${year}年${month}月.csv`,rows);
   };
@@ -6872,11 +6923,11 @@ function MCAccountingView({ year, month, cfg }) {
         <div style={{padding:"14px 16px",fontWeight:700,fontSize:14,borderBottom:`1px solid ${C.border}`}}>📋 全件明細</div>
         {allRecords.length===0&&<p style={{padding:20,textAlign:"center",color:C.muted,fontSize:13}}>記録がありません</p>}
         {allRecords.length>0&&(
-          <table style={{width:"100%",borderCollapse:"collapse",minWidth:480}}>
+          <table style={{width:"100%",borderCollapse:"collapse",minWidth:760}}>
             <thead><tr style={{background:"#f8f9fb"}}>
               <th style={TH}>日付</th><th style={TH}>スタッフ</th>
               <th style={TH}>会社</th><th style={TH}>会場</th>
-              <th style={TH}>役割</th><th style={TH}>種別</th>
+              <th style={TH}>役割</th><th style={TH}>種別</th><th style={TH}>支払区分</th><th style={TH}>勤務時間</th><th style={TH}>支払額</th>
             </tr></thead>
             <tbody>
               {allRecords.flatMap(r=>getMCCeremonySchedule(r).map(item=>({record:r,...item}))).sort((a,b)=>a.date>b.date?1:-1).map(({record:r,date,label,index,total})=>(
@@ -6887,6 +6938,9 @@ function MCAccountingView({ year, month, cfg }) {
                   <td style={TD}>{r.venue}</td>
                   <td style={{...TD,fontWeight:600}}>{r.role}</td>
                   <td style={{...TD,color:C.muted}}>{r.role==="パントリー"?"－":<>{label}{total===2&&<span style={{display:"inline-block",marginLeft:5,background:"#ede9fe",color:C.purple,borderRadius:999,padding:"1px 6px",fontSize:10,fontWeight:800}}>2日間 {index}/2</span>}</>}</td>
+                  <td style={TD}>{getMCPayMode(r)==="hourly"?"時給":"1回"}</td>
+                  <td style={{...TD,whiteSpace:"nowrap"}}>{getMCPayMode(r)==="hourly"?`${r.start}-${r.end}／${getMCRecordedHours(r)}h`:"－"}</td>
+                  <td style={{...TD,textAlign:"right",fontWeight:800,color:C.blue}}>{index===1?yen(getMCStaffPayment(cfg,r.staff,r)):"－"}</td>
                 </tr>
               ))}
             </tbody>
@@ -7136,7 +7190,7 @@ function CompassKnowledgeBaseAdmin({compassKb,sv,flash}){
 }
 
 function MCConfigTab({ cfg, sv }) {
-  const { staff } = cfg;
+  const staff = Array.from(new Set([...(cfg.mcStaff||[]),...(cfg.assistStaff||[])]));
   const clients=getClients(cfg);
   const ceremonyTypes=getCeremonyTypes(cfg).map(t=>t.label);
   const pantryBillingType=ceremonyTypes[0]||"通夜";
@@ -7148,6 +7202,9 @@ function MCConfigTab({ cfg, sv }) {
   const [rates, setRates] = useState(
     JSON.parse(JSON.stringify(cfg.mcRatesV2 || {}))
   );
+  const [hourlyRates, setHourlyRates] = useState(
+    JSON.parse(JSON.stringify(cfg.mcHourlyRates || {}))
+  );
   const [saved, setSaved] = useState(false);
 
   const setRate = (name, columnId, val) => {
@@ -7155,6 +7212,13 @@ function MCConfigTab({ cfg, sv }) {
     if(!n[name]) n[name]={};
     n[name][columnId] = Number(val)||0;
     setRates(n);
+  };
+
+  const setHourlyRate = (name, ruleId, val) => {
+    const n = {...hourlyRates};
+    if(!n[name]) n[name]={};
+    n[name][ruleId] = Number(val)||0;
+    setHourlyRates(n);
   };
 
   const setBill = (company, role, type, val) => {
@@ -7166,7 +7230,7 @@ function MCConfigTab({ cfg, sv }) {
   };
 
   const save = () => {
-    sv.sets({...cfg, mcBilling:billing, mcRatesV2:rates});
+    sv.sets({...cfg, mcBilling:billing, mcRatesV2:rates, mcHourlyRates:hourlyRates});
     setSaved(true);
     setTimeout(()=>setSaved(false),2000);
   };
@@ -7205,6 +7269,26 @@ function MCConfigTab({ cfg, sv }) {
           </div>
         </div>
       ))}
+
+      <div style={GC}>
+        <h3 style={{margin:"0 0 6px",fontSize:14,color:C.navy}}>⏱️ スタッフへの支払い時給</h3>
+        <div style={{fontSize:12,color:C.muted,marginBottom:14}}>ふかしなのアシスタント、あしべの杜のパントリーだけに使用します。その他は下の「1回あたり」の単価です。</div>
+        <div style={{overflowX:"auto"}}>
+          <table style={{width:"100%",borderCollapse:"collapse",minWidth:440}}>
+            <thead><tr style={{background:"#f8f9fb"}}>
+              <th style={TH}>スタッフ</th>
+              {MC_HOURLY_RULES.map(rule=><th key={rule.id} style={TH}>{rule.label}</th>)}
+            </tr></thead>
+            <tbody>{staff.map(name=><tr key={name}>
+              <td style={{...TD,fontWeight:700,whiteSpace:"nowrap"}}>{name}</td>
+              {MC_HOURLY_RULES.map(rule=><td key={rule.id} style={TD}>
+                <input type="number" value={hourlyRates[name]?.[rule.id]||""} onChange={e=>setHourlyRate(name,rule.id,e.target.value)} placeholder="0"
+                  style={{width:"100%",minWidth:90,border:`1px solid ${C.border}`,borderRadius:6,padding:"5px 8px",fontSize:13,boxSizing:"border-box"}}/>
+              </td>)}
+            </tr>)}</tbody>
+          </table>
+        </div>
+      </div>
 
       {/* スタッフ個人単価 */}
       <div style={GC}>
@@ -7250,6 +7334,6 @@ function MCConfigTab({ cfg, sv }) {
 
 ReactDOM.createRoot(document.getElementById('root')).render(<App/>);
 </script>
-<div aria-hidden="true" style="position:fixed;right:12px;bottom:max(8px,env(safe-area-inset-bottom));z-index:9999;pointer-events:none;opacity:.82;font-size:12px;line-height:1.35;color:#92400e;background:#fffbeb;border:1px solid #f59e0b;border-radius:6px;padding:4px 8px;text-align:left;font-weight:800;">本番<br>Sprint 28<br>Build 20260819.2</div>
+<div aria-hidden="true" style="position:fixed;right:12px;bottom:max(8px,env(safe-area-inset-bottom));z-index:9999;pointer-events:none;opacity:.82;font-size:12px;line-height:1.35;color:#92400e;background:#fffbeb;border:1px solid #f59e0b;border-radius:6px;padding:4px 8px;text-align:left;font-weight:800;">本番<br>Sprint 28<br>Build 20260819.3</div>
 </body>
 </html>
