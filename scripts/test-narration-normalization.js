@@ -4,6 +4,9 @@ const vm = require("node:vm");
 
 const source = `${fs.readFileSync("api/generate-narration.js", "utf8")}
 this.testHelpers = { normalizeQuotationContext, normalizeFamilyNearNarration, buildStableFamilyPortrait, qualityCheckNarration, narrationCandidateScore, pickMemoryCards, staffSelectedMemoryPlan, compactNarrationPrompt, extractStyleReferenceSection, narrationSentenceCount, applyNameRule, closingStartsWithSeasonalLanguage };`;
+assert.equal(source.includes('type: "json_schema"'), true);
+assert.equal(source.includes('name: "compass_funeral_narration"'), true);
+assert.equal(source.includes('strict: true'), true);
 const context = {
   module: { exports: {} },
   exports: {},

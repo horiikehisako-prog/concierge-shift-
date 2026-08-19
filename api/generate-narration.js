@@ -13,6 +13,22 @@ const ALLOW_HARD_RETRY = false;
 const ENABLE_LENGTH_REPAIR = false;
 const ENABLE_GUARDED_COPY_EDIT = true;
 const ENABLE_LEGACY_NARRATION_REWRITES = false;
+const NARRATION_RESPONSE_SCHEMA = {
+  type: "object",
+  additionalProperties: false,
+  properties: {
+    openingNarration: { type: "string" },
+    closingNarration: { type: "string" },
+    detectedTheme: { type: "string" },
+    improvementNotes: { type: "string" },
+  },
+  required: [
+    "openingNarration",
+    "closingNarration",
+    "detectedTheme",
+    "improvementNotes",
+  ],
+};
 const ENABLE_STABLE_FAMILY_PORTRAIT_PREFLIGHT = false;
 const ENABLE_STABLE_FAMILY_PORTRAIT_POSTPROCESS = false;
 const NARRATION_AUTHOR_SYSTEM_PROMPT = [
@@ -2195,7 +2211,14 @@ const requestNarration = async ({
       };
       body.text = {
         verbosity: "high",
-        format: { type: "json_object" },
+        format: forcePlainJson
+          ? { type: "json_object" }
+          : {
+              type: "json_schema",
+              name: "compass_funeral_narration",
+              strict: true,
+              schema: NARRATION_RESPONSE_SCHEMA,
+            },
       };
 
       const controller = timeoutMs > 0 ? new AbortController() : null;
