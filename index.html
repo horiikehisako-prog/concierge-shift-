@@ -55,7 +55,7 @@ const STUDY_RATE = 3000;  // 勉強会費用（1時間）
 const DEFAULT_SUPPORT_PASS = "1234";
 const APP_NAME = "Compass";
 const APP_SUBTITLE = "仕事・成長・チームをつなぐ";
-const DEV_BUILD_LABEL = "Sprint 28 Build 20260819.1";
+const DEV_BUILD_LABEL = "Sprint 28 Build 20260819.2";
 const APP_ENV_LABEL = "本番";
 const SUPPORT_SKILL_GROUPS = [
   {id:"concierge", title:"コンシェルジュ業務", items:[
@@ -428,6 +428,8 @@ const EVENT_BILLING_OPTIONS = [
   {value:EVENT_BILLING_CLIENT,label:"会館要望（請求あり）"},
   {value:EVENT_BILLING_INTERNAL,label:"社内教育（請求なし）"},
 ];
+const isInternalEducationAssignment=assignment=>
+  !!assignment?.isEvent&&assignment.billingType===EVENT_BILLING_INTERNAL;
 const ASUKA_VENUES = [
   "東手城斎場",
   "春日斎場",
@@ -3965,7 +3967,7 @@ function VenueView(P){
     {tab==="confirm"&&<VenueConfirm {...P}/>}
     {tab==="shift"  &&<PublicShift {...P} uname=""/>}
     {tab==="att"    &&<VenueAtt {...P}/>}
-    {tab==="print"  &&<PrintableSheet {...P}/>}
+    {tab==="print"  &&<PrintableSheet {...P} hideInternalEducation/>}
   </div>;
 }
 
@@ -4051,6 +4053,7 @@ function VenueAtt({year,month,att,shifts,cfg,sv,flash}){
   const {venues}=cfg,days=getDays(year,month);
   const rows=[];
   for(let d=1;d<=days;d++) for(const a of getConciergeAssignments(shifts,d,cfg)){
+    if(isInternalEducationAssignment(a)) continue;
     const rec=att[a.key];
     if(rec||a.staff)rows.push({d,venue:a.venue,sched:a.staff,rec,key:a.key});
   }
@@ -5680,7 +5683,7 @@ function AttendanceSummaryView({year,month,att,shifts,vconf,cfg}){
 // ═══════════════════════════════════════════════════════════════
 // 出勤表印刷（ファックス形式）
 // ═══════════════════════════════════════════════════════════════
-function PrintableSheet({year,month,shifts,att,vconf,cfg}){
+function PrintableSheet({year,month,shifts,att,vconf,cfg,hideInternalEducation=false}){
   const {venues}=cfg;
   const days=getDays(year,month);
 
@@ -5696,6 +5699,7 @@ function PrintableSheet({year,month,shifts,att,vconf,cfg}){
   for(let d=1;d<=days;d++){
     const slots=[];
     for(const a of getConciergeAssignments(shifts,d,cfg)){
+      if(hideInternalEducation&&isInternalEducationAssignment(a)) continue;
       const rec=att[a.key];
       const sn=getActualAssignmentStaff(a,rec);
       if(sn){
@@ -7246,6 +7250,6 @@ function MCConfigTab({ cfg, sv }) {
 
 ReactDOM.createRoot(document.getElementById('root')).render(<App/>);
 </script>
-<div aria-hidden="true" style="position:fixed;right:12px;bottom:max(8px,env(safe-area-inset-bottom));z-index:9999;pointer-events:none;opacity:.82;font-size:12px;line-height:1.35;color:#92400e;background:#fffbeb;border:1px solid #f59e0b;border-radius:6px;padding:4px 8px;text-align:left;font-weight:800;">本番<br>Sprint 28<br>Build 20260819.1</div>
+<div aria-hidden="true" style="position:fixed;right:12px;bottom:max(8px,env(safe-area-inset-bottom));z-index:9999;pointer-events:none;opacity:.82;font-size:12px;line-height:1.35;color:#92400e;background:#fffbeb;border:1px solid #f59e0b;border-radius:6px;padding:4px 8px;text-align:left;font-weight:800;">本番<br>Sprint 28<br>Build 20260819.2</div>
 </body>
 </html>
