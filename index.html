@@ -55,7 +55,7 @@ const STUDY_RATE = 3000;  // 勉強会費用（1時間）
 const DEFAULT_SUPPORT_PASS = "1234";
 const APP_NAME = "Compass";
 const APP_SUBTITLE = "仕事・成長・チームをつなぐ";
-const DEV_BUILD_LABEL = "Sprint 28 Build 20260817.11";
+const DEV_BUILD_LABEL = "Sprint 28 Build 20260819.1";
 const APP_ENV_LABEL = "本番";
 const SUPPORT_SKILL_GROUPS = [
   {id:"concierge", title:"コンシェルジュ業務", items:[
@@ -311,6 +311,7 @@ const normalizeShiftsForStaff = (shifts,staff) => Object.fromEntries(
           return {
             staff:normalized.staff?canonicalStaffName(normalized.staff,staff):"",
             venue:normalized.venue,
+            billingType:normalized.billingType,
           };
         });
         return [venue,slots];
@@ -421,6 +422,12 @@ const prefLabel = s => s || "未";
 const EVENT_STAFF_KEY = "__eventStaff";
 const EVENT_STAFF_LABEL = "イベント応援";
 const EVENT_STAFF_MAX = 2;
+const EVENT_BILLING_CLIENT = "client";
+const EVENT_BILLING_INTERNAL = "internal";
+const EVENT_BILLING_OPTIONS = [
+  {value:EVENT_BILLING_CLIENT,label:"会館要望（請求あり）"},
+  {value:EVENT_BILLING_INTERNAL,label:"社内教育（請求なし）"},
+];
 const ASUKA_VENUES = [
   "東手城斎場",
   "春日斎場",
@@ -447,9 +454,14 @@ const getEventVenueOptions = cfg => Array.from(new Set([
 ].filter(Boolean)));
 const normalizeEventSlot = (value,index=0) => {
   if(value&&typeof value==="object"&&!Array.isArray(value)){
-    return {staff:String(value.staff||"").trim(),venue:String(value.venue||"").trim(),index};
+    return {
+      staff:String(value.staff||"").trim(),
+      venue:String(value.venue||"").trim(),
+      billingType:value.billingType===EVENT_BILLING_INTERNAL?EVENT_BILLING_INTERNAL:EVENT_BILLING_CLIENT,
+      index,
+    };
   }
-  return {staff:String(value||"").trim(),venue:"",index};
+  return {staff:String(value||"").trim(),venue:"",billingType:EVENT_BILLING_CLIENT,index};
 };
 const getEventSlots = (shifts,d) => {
   const values=Array.isArray(shifts?.[d]?.[EVENT_STAFF_KEY])?shifts[d][EVENT_STAFF_KEY]:[];
@@ -463,7 +475,8 @@ const getConciergeAssignments = (shifts,d,cfg) => [
   })).filter(a=>a.staff),
   ...getEventSlots(shifts,d).map(slot=>({
     staff:slot.staff,venue:slot.venue||EVENT_STAFF_LABEL,venueKey:EVENT_STAFF_KEY,
-    key:`${d}-${EVENT_STAFF_KEY}-${slot.index}`,venueConfig:null,isEvent:true,index:slot.index
+    key:`${d}-${EVENT_STAFF_KEY}-${slot.index}`,venueConfig:null,isEvent:true,index:slot.index,
+    billingType:slot.billingType
   }))
 ];
 const getActualAssignmentStaff = (assignment,rec) => String(rec?.staff||assignment?.staff||"").trim();
@@ -1306,7 +1319,7 @@ function App(){
       const rawEvent=Array.isArray(D.shifts?.[d]?.[EVENT_STAFF_KEY])?D.shifts[d][EVENT_STAFF_KEY]:[];
       const eventSlots=Array.from({length:EVENT_STAFF_MAX},(_,index)=>normalizeEventSlot(rawEvent[index],index));
       while(eventSlots.length&&!eventSlots[eventSlots.length-1].staff&&!eventSlots[eventSlots.length-1].venue)eventSlots.pop();
-      if(eventSlots.some(slot=>slot.staff))ns[d]={[EVENT_STAFF_KEY]:eventSlots.map(({staff,venue})=>({staff,venue}))};
+      if(eventSlots.some(slot=>slot.staff))ns[d]={[EVENT_STAFF_KEY]:eventSlots.map(({staff,venue,billingType})=>({staff,venue,billingType}))};
     }
     const totalCnt={}, venueCnt={};
     staff.forEach(s=>{totalCnt[s]=0;venueCnt[s]={};venues.forEach(v=>{venueCnt[s][v.name]=0;});});
@@ -2442,7 +2455,7 @@ function AdminPrefView({year,month,prefs,shifts,cfg,sv}){
     next[index]={...next[index],[field]:value};
     while(next.length&&!next[next.length-1].staff&&!next[next.length-1].venue)next.pop();
     const day={...(shifts[d]||{})};
-    if(next.length)day[EVENT_STAFF_KEY]=next.map(({staff,venue})=>({staff,venue}));else delete day[EVENT_STAFF_KEY];
+    if(next.length)day[EVENT_STAFF_KEY]=next.map(({staff,venue,billingType})=>({staff,venue,billingType}));else delete day[EVENT_STAFF_KEY];
     sv.shifts({...shifts,[d]:day});
   };
   const adminChoiceLabel=(name,d)=>{
@@ -2523,7 +2536,7 @@ function AdminPrefView({year,month,prefs,shifts,cfg,sv}){
               })}
               {!applicants.length&&<span style={{color:C.muted,fontSize:12}}>なし</span>}
             </div></td>
-            <td style={TD}><div style={{display:"flex",flexDirection:"column",gap:6,minWidth:190}}>
+            <td style={TD}><div style={{display:"flex",flexDirection:"column",gap:6,minWidth:390}}>
               {venues.map(v=>{
                 const value=shifts[d]?.[v.name]||"";
                 const outsidePreference=value&&!isAvailableStatus(prefStatus(prefs,value,d));
@@ -2540,7 +2553,7 @@ function AdminPrefView({year,month,prefs,shifts,cfg,sv}){
                 <div style={{fontSize:11,fontWeight:700,color:C.purple,marginBottom:4}}>イベント応援（必要な日だけ）</div>
                 {Array.from({length:EVENT_STAFF_MAX},(_,index)=>{
                   const slot=normalizeEventSlot((shifts[d]?.[EVENT_STAFF_KEY]||[])[index],index);
-                  return <div key={index} style={{display:"grid",gridTemplateColumns:"1fr 92px",gap:4,marginTop:index?5:0}}>
+                  return <div key={index} style={{display:"grid",gridTemplateColumns:"minmax(130px,1fr) 100px 150px",gap:4,marginTop:index?5:0}}>
                     <select value={slot.staff} onChange={e=>setEventAssignment(d,index,"staff",e.target.value)}
                       style={{width:"100%",border:`1px solid ${C.border}`,borderRadius:6,padding:"5px 6px",fontSize:12,background:"#fff"}}>
                       <option value="">-- 追加{index+1} 未定 --</option>
@@ -2550,6 +2563,10 @@ function AdminPrefView({year,month,prefs,shifts,cfg,sv}){
                       style={{width:"100%",border:`1px solid ${slot.staff&&!slot.venue?C.amber:C.border}`,borderRadius:6,padding:"5px 4px",fontSize:12,background:slot.staff?"#fff":"#f1f5f9"}}>
                       <option value="">会場</option>
                       {eventVenueOptions.map(v=><option key={v} value={v}>{v}</option>)}
+                    </select>
+                    <select value={slot.billingType} onChange={e=>setEventAssignment(d,index,"billingType",e.target.value)} disabled={!slot.staff}
+                      style={{width:"100%",border:`1px solid ${slot.billingType===EVENT_BILLING_INTERNAL?C.blue:C.border}`,borderRadius:6,padding:"5px 4px",fontSize:11,background:slot.staff?"#fff":"#f1f5f9",color:slot.billingType===EVENT_BILLING_INTERNAL?C.blue:C.text}}>
+                      {EVENT_BILLING_OPTIONS.map(o=><option key={o.value} value={o.value}>{o.label}</option>)}
                     </select>
                   </div>;
                 })}
@@ -2600,7 +2617,7 @@ function AdminShiftView({year,month,shifts,prefs,vconf,cfg,sv,generate}){
       next[index]={...next[index],[field]:value};
       while(next.length&&!next[next.length-1].staff&&!next[next.length-1].venue)next.pop();
       const day={...(prev[d]||{})};
-      if(next.length)day[EVENT_STAFF_KEY]=next.map(({staff,venue})=>({staff,venue}));else delete day[EVENT_STAFF_KEY];
+      if(next.length)day[EVENT_STAFF_KEY]=next.map(({staff,venue,billingType})=>({staff,venue,billingType}));else delete day[EVENT_STAFF_KEY];
       return {...prev,[d]:day};
     });
     setDirty(true);
@@ -2655,7 +2672,7 @@ function AdminShiftView({year,month,shifts,prefs,vconf,cfg,sv,generate}){
         <thead><tr>
           <th style={{...TH,width:32}}>日</th><th style={{...TH,width:26}}>曜</th>
           {venues.map(v=><th key={v.name} style={TH}>{v.name}</th>)}
-          <th style={{...TH,minWidth:270}}>イベント応援（担当者・会場）</th>
+          <th style={{...TH,minWidth:390}}>イベント応援（担当者・会場・請求区分）</th>
         </tr></thead>
         <tbody>{Array.from({length:days},(_,i)=>i+1).map(d=>{
           const wdi=getWdayI(year,month,d);
@@ -2682,11 +2699,11 @@ function AdminShiftView({year,month,shifts,prefs,vconf,cfg,sv,generate}){
                 {notOpted&&<div style={{fontSize:10,color:C.amber}}>⚡ 希望外</div>}
               </td>;
             })}
-            <td style={{...TD,minWidth:270,background:getEventStaff(local,d).length?"#faf5ff":undefined}}>
+            <td style={{...TD,minWidth:390,background:getEventStaff(local,d).length?"#faf5ff":undefined}}>
               {Array.from({length:EVENT_STAFF_MAX},(_,index)=>{
                 const slot=normalizeEventSlot((local[d]?.[EVENT_STAFF_KEY]||[])[index],index);
                 const notOpted=slot.staff&&!isAvailableStatus(prefStatus(prefs,slot.staff,d));
-                return <div key={index} style={{display:"grid",gridTemplateColumns:"1fr 92px",gap:4,marginTop:index?5:0}}>
+                return <div key={index} style={{display:"grid",gridTemplateColumns:"minmax(130px,1fr) 100px 150px",gap:4,marginTop:index?5:0}}>
                   <select value={slot.staff} onChange={e=>setEventCell(d,index,"staff",e.target.value)}
                     style={{width:"100%",border:`1px solid ${notOpted?C.amber:C.border}`,borderRadius:6,padding:"4px 6px",fontSize:12,background:"#fff"}}>
                     <option value="">-- 追加{index+1} 未定 --</option>
@@ -2700,6 +2717,10 @@ function AdminShiftView({year,month,shifts,prefs,vconf,cfg,sv,generate}){
                     style={{width:"100%",border:`1px solid ${slot.staff&&!slot.venue?C.amber:C.border}`,borderRadius:6,padding:"4px",fontSize:12,background:slot.staff?"#fff":"#f1f5f9"}}>
                     <option value="">会場</option>
                     {eventVenueOptions.map(v=><option key={v} value={v}>{v}</option>)}
+                  </select>
+                  <select value={slot.billingType} onChange={e=>setEventCell(d,index,"billingType",e.target.value)} disabled={!slot.staff}
+                    style={{width:"100%",border:`1px solid ${slot.billingType===EVENT_BILLING_INTERNAL?C.blue:C.border}`,borderRadius:6,padding:"4px",fontSize:11,background:slot.staff?"#fff":"#f1f5f9",color:slot.billingType===EVENT_BILLING_INTERNAL?C.blue:C.text}}>
+                    {EVENT_BILLING_OPTIONS.map(o=><option key={o.value} value={o.value}>{o.label}</option>)}
                   </select>
                   {notOpted&&<div style={{gridColumn:"1 / -1",fontSize:10,color:C.amber}}>⚡ 希望外</div>}
                 </div>;
@@ -3193,11 +3214,13 @@ function buildConciergeMonthlyRows({year,month,att,shifts,vconf,cfg,approvedOnly
     const breakMin=rec?.breakMin??60;
     const hours=rec?parseHours(start,end,breakMin):DEFAULT_HOURS;
     const rate=(cfg.staffRates||{})[staff]||RATE_STAFF;
+    const billingType=a.isEvent?(a.billingType||EVENT_BILLING_CLIENT):EVENT_BILLING_CLIENT;
     rows.push({
       source:"concierge",date:`${year}/${month}/${d}`,d,staff,role:"Concierge",
       client:"コンシェルジュ",location:a.isEvent?a.venue:actualMonthlyVenue(cfg,vconf,d,a.venue),
       start,end,breakMin,hours,dailyCount:0,rate,amount:Math.round(hours*rate),
-      status:rec?.verified?"承認済":rec?"未承認":"未入力",approved:!!rec?.verified
+      status:rec?.verified?"承認済":rec?"未承認":"未入力",approved:!!rec?.verified,
+      isEvent:a.isEvent,billingType,billable:!a.isEvent||billingType!==EVENT_BILLING_INTERNAL
     });
   }
   return rows;
@@ -3218,7 +3241,7 @@ function inferBillingCompanyFromVenue(cfg, venue){
 }
 
 function buildConciergeBillingRows({year,month,att,shifts,vconf,cfg,approvedOnly=false}){
-  return buildConciergeMonthlyRows({year,month,att,shifts,vconf,cfg,approvedOnly}).map(r=>{
+  return buildConciergeMonthlyRows({year,month,att,shifts,vconf,cfg,approvedOnly}).filter(r=>r.billable!==false).map(r=>{
     const sub=Math.round((r.hours||0)*RATE_BILL);
     const tax=Math.round(sub*TAX_RATE);
     return {
@@ -3247,16 +3270,21 @@ function buildMCBillingRows(records,cfg){
 function MonthlyInvoiceList(P){
   const {year,month,cfg,shifts,att}=P;
   const {loading,records}=useMonthlyMCRecords(year,month,cfg);
+  const allConciergeWorkRows=buildConciergeMonthlyRows({...P,approvedOnly:false});
+  const internalEducationRows=allConciergeWorkRows.filter(r=>r.billable===false);
   const allConciergeRows=buildConciergeBillingRows({...P,approvedOnly:false});
   const approvedConciergeRows=buildConciergeBillingRows({...P,approvedOnly:true});
   const excludedConciergeRows=allConciergeRows.filter(r=>r.status!=="承認済");
   const eventDayAudit=[];
   for(let d=1;d<=getDays(year,month);d++){
     const assignments=getConciergeAssignments(shifts,d,cfg);
-    const eventCount=assignments.filter(a=>a.isEvent).length;
-    if(!eventCount) continue;
-    const approvedCount=assignments.filter(a=>att[a.key]?.verified).length;
-    eventDayAudit.push({d,total:assignments.length,eventCount,approvedCount,pending:assignments.length-approvedCount});
+    const eventAssignments=assignments.filter(a=>a.isEvent);
+    if(!eventAssignments.length) continue;
+    const clientEvents=eventAssignments.filter(a=>a.billingType!==EVENT_BILLING_INTERNAL);
+    const internalEvents=eventAssignments.filter(a=>a.billingType===EVENT_BILLING_INTERNAL);
+    const billableAssignments=assignments.filter(a=>!a.isEvent||a.billingType!==EVENT_BILLING_INTERNAL);
+    const approvedCount=billableAssignments.filter(a=>att[a.key]?.verified).length;
+    eventDayAudit.push({d,total:billableAssignments.length,eventCount:clientEvents.length,internalCount:internalEvents.length,approvedCount,pending:billableAssignments.length-approvedCount});
   }
   const rows=[...approvedConciergeRows,...buildMCBillingRows(records,cfg)]
     .sort((a,b)=>String(a.company).localeCompare(String(b.company),"ja")||String(a.venue).localeCompare(String(b.venue),"ja")||(a.d-b.d));
@@ -3303,16 +3331,25 @@ function MonthlyInvoiceList(P){
       <div style={{...GC,marginBottom:0,textAlign:"center"}}><div style={{fontSize:20,fontWeight:900,color:C.purple}}>{yen(total)}</div><div style={{fontSize:12,color:C.muted}}>請求合計(税込)</div></div>
       <div style={{...GC,marginBottom:0,textAlign:"center"}}><div style={{fontSize:20,fontWeight:900,color:C.blue}}>{rows.length}</div><div style={{fontSize:12,color:C.muted}}>明細件数</div></div>
       <div style={{...GC,marginBottom:0,textAlign:"center"}}><div style={{fontSize:20,fontWeight:900,color:excludedConciergeRows.length?C.red:C.green}}>{excludedConciergeRows.length}</div><div style={{fontSize:12,color:C.muted}}>請求対象外（未入力・未承認）</div></div>
+      <div style={{...GC,marginBottom:0,textAlign:"center"}}><div style={{fontSize:20,fontWeight:900,color:C.blue}}>{internalEducationRows.length}</div><div style={{fontSize:12,color:C.muted}}>請求対象外（社内教育）</div></div>
     </div>
     {eventDayAudit.length>0&&<div className="no-print" style={{...GC,border:`1px solid ${C.amber}`,background:C.amberL}}>
       <div style={{fontWeight:900,color:"#92400e",marginBottom:8}}>イベント日の人数確認</div>
       <div style={{display:"flex",gap:8,flexWrap:"wrap"}}>{eventDayAudit.map(r=><div key={r.d}
         style={{background:"#fff",border:`1px solid ${r.pending?C.red:C.green}`,borderRadius:8,padding:"8px 11px",fontSize:12}}>
-        <strong>{month}/{r.d}</strong>　シフト{r.total}名（追加{r.eventCount}名）　
+        <strong>{month}/{r.d}</strong>　請求対象{r.total}名（会館要望の追加{r.eventCount}名）　
+        {r.internalCount>0&&<span style={{color:C.blue,fontWeight:900}}>社内教育{r.internalCount}名／請求なし　</span>}
         <span style={{color:r.pending?C.red:C.green,fontWeight:900}}>承認済{r.approvedCount}名</span>
         {r.pending>0&&<span style={{color:C.red,fontWeight:900}}>／未反映{r.pending}名</span>}
       </div>)}</div>
-      <div style={{fontSize:12,color:"#92400e",marginTop:8}}>未反映がある日は、シフト管理で担当者を確認し、出勤記録で勤務時間を入力して承認してください。承認後、月次請求へ自動的に入ります。</div>
+      <div style={{fontSize:12,color:"#92400e",marginTop:8}}>会館要望分は出勤記録を承認すると月次請求へ入ります。社内教育分は出勤・給与記録には残りますが、請求には入りません。</div>
+    </div>}
+    {internalEducationRows.length>0&&<div className="no-print" style={{...GC,border:`1px solid ${C.blue}`,background:C.blueL}}>
+      <div style={{fontWeight:900,color:C.blue,marginBottom:8}}>請求しない社内教育・研修の応援</div>
+      <div style={{display:"flex",gap:8,flexWrap:"wrap"}}>{internalEducationRows.map(r=><div key={`${r.date}-${r.staff}-${r.location}`}
+        style={{background:"#fff",border:`1px solid ${C.border}`,borderRadius:8,padding:"7px 10px",fontSize:12}}>
+        <strong>{r.date}</strong>　{r.staff}　{r.location}　<span style={{color:r.approved?C.green:C.amber,fontWeight:800}}>{r.status}</span>
+      </div>)}</div>
     </div>}
     {excludedConciergeRows.length>0&&<div className="no-print" style={{...GC,border:`1px solid ${C.red}`,background:C.redL,color:"#991b1b",fontSize:12,fontWeight:700}}>
       コンシェルジュのうち{excludedConciergeRows.length}件は、出勤記録が未入力または未承認のため、現在の請求合計には含まれていません。
@@ -7209,6 +7246,6 @@ function MCConfigTab({ cfg, sv }) {
 
 ReactDOM.createRoot(document.getElementById('root')).render(<App/>);
 </script>
-<div aria-hidden="true" style="position:fixed;right:12px;bottom:max(8px,env(safe-area-inset-bottom));z-index:9999;pointer-events:none;opacity:.82;font-size:12px;line-height:1.35;color:#92400e;background:#fffbeb;border:1px solid #f59e0b;border-radius:6px;padding:4px 8px;text-align:left;font-weight:800;">本番<br>Sprint 28<br>Build 20260817.11</div>
+<div aria-hidden="true" style="position:fixed;right:12px;bottom:max(8px,env(safe-area-inset-bottom));z-index:9999;pointer-events:none;opacity:.82;font-size:12px;line-height:1.35;color:#92400e;background:#fffbeb;border:1px solid #f59e0b;border-radius:6px;padding:4px 8px;text-align:left;font-weight:800;">本番<br>Sprint 28<br>Build 20260819.1</div>
 </body>
 </html>
