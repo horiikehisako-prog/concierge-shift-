@@ -55,7 +55,7 @@ const STUDY_RATE = 3000;  // 勉強会費用（1時間）
 const DEFAULT_SUPPORT_PASS = "1234";
 const APP_NAME = "Compass";
 const APP_SUBTITLE = "仕事・成長・チームをつなぐ";
-const DEV_BUILD_LABEL = "Sprint 28 Build 20260820.3";
+const DEV_BUILD_LABEL = "Sprint 28 Build 20260820.4";
 const APP_ENV_LABEL = location.hostname==="concierge-shift-prod.vercel.app" ? "本番" : "確認版";
 const SUPPORT_SKILL_GROUPS = [
   {id:"concierge", title:"コンシェルジュ業務", items:[
@@ -3947,6 +3947,9 @@ function MyRecord({year,month,shifts,att,sv,uname,cfg,vconf}){
   const [ed,setEd]=useState(null);
   const [punching,setPunching]=useState("");
   const [geoNotice,setGeoNotice]=useState({});
+  const [testVenue,setTestVenue]=useState(Object.keys(ASUKA_VENUE_GEOFENCES)[0]||"");
+  const [testPunch,setTestPunch]=useState({start:"",end:""});
+  const [testNotice,setTestNotice]=useState("");
   const myS=[];
   for(let d=1;d<=days;d++){
     if(year===today.getFullYear()&&month===today.getMonth()+1&&d>today.getDate())continue;
@@ -3970,6 +3973,25 @@ function MyRecord({year,month,shifts,att,sv,uname,cfg,vconf}){
       reject(new Error(msg));
     },{enableHighAccuracy:true,timeout:15000,maximumAge:0});
   });
+  const runPunchTest=async kind=>{
+    const fence=getVenueGeofence(testVenue);
+    if(!fence){setTestNotice("選択した会場の位置情報が登録されていません");return;}
+    if(kind==="out"&&!testPunch.start){setTestNotice("先に『出勤テスト』を押してください");return;}
+    setPunching(`test-${kind}`);setTestNotice("現在地を確認しています…");
+    try{
+      const pos=await locate(),{latitude,longitude,accuracy}=pos.coords;
+      const distance=geoDistanceMeters(latitude,longitude,fence.lat,fence.lng);
+      const allowedDistance=fence.radiusMeters+Math.min(Math.max(Math.round(accuracy||0),0),75);
+      if(distance>allowedDistance){
+        setTestNotice(`テスト結果：打刻できません（${testVenue}から約${distance}m）。会場の基本${fence.radiusMeters}m以内でのみ打刻できます。記録は保存していません。`);
+        return;
+      }
+      const time=localTimeHHMM(new Date());
+      setTestPunch(prev=>kind==="in"?{start:time,end:""}:{...prev,end:time});
+      setTestNotice(`テスト成功：${kind==="in"?"出勤":"退勤"} ${time}（${testVenue}から約${distance}m）。これは確認用のため保存していません。`);
+    }catch(e){setTestNotice(`テスト結果：${e.message||"位置情報を取得できませんでした"}。記録は保存していません。`);}
+    finally{setPunching("");}
+  };
   const punch=async({d,venue,key,rec},kind)=>{
     const fence=getVenueGeofence(venue);
     if(!isToday(d)){setGeoNotice({...geoNotice,[key]:"打刻は勤務当日のみ行えます。過去日の修正は下の『時間を修正』をご利用ください"});return;}
@@ -4010,6 +4032,22 @@ function MyRecord({year,month,shifts,att,sv,uname,cfg,vconf}){
     <div style={{background:"#eff6ff",border:`1px solid ${C.blue}`,borderRadius:9,padding:"9px 12px",fontSize:11,color:C.blue,marginBottom:14,lineHeight:1.6}}>
       📍 対応会場：飛鳥会館6会場、あしべの杜、追憶の杜、メモリアルホール府中、神辺ふかしな葬祭 御領ホール（各会場から基本150m以内）<br/>位置情報を取得できない場合や過去日の修正は、従来どおり時間を手入力できます。
     </div>
+    {APP_ENV_LABEL==="確認版"&&<div style={{background:"#fff7ed",border:`1px solid ${C.amber}`,borderRadius:10,padding:12,marginBottom:14}}>
+      <div style={{fontWeight:900,color:"#9a3412",marginBottom:4}}>🧪 保存しない打刻テスト</div>
+      <div style={{fontSize:11,color:C.muted,lineHeight:1.5,marginBottom:9}}>シフトや出勤記録には一切保存されません。会場を選び、位置情報の許可と打刻範囲の判定を確認できます。</div>
+      <select value={testVenue} onChange={e=>{setTestVenue(e.target.value);setTestPunch({start:"",end:""});setTestNotice("");}}
+        style={{width:"100%",border:`1px solid ${C.border}`,borderRadius:7,padding:"9px 10px",fontSize:14,background:"#fff",marginBottom:8}}>
+        {Object.keys(ASUKA_VENUE_GEOFENCES).map(name=><option key={name} value={name}>{name}</option>)}
+      </select>
+      <div style={{display:"grid",gridTemplateColumns:"repeat(2,minmax(0,1fr))",gap:8}}>
+        <button disabled={!!punching||!!testPunch.start} onClick={()=>runPunchTest("in")}
+          style={{...Btn(testPunch.start?C.muted:C.green),padding:"10px 6px",opacity:(punching||testPunch.start)?0.6:1}}>📍 {punching==="test-in"?"確認中…":"出勤テスト"}</button>
+        <button disabled={!!punching||!testPunch.start||!!testPunch.end} onClick={()=>runPunchTest("out")}
+          style={{...Btn(testPunch.start&&!testPunch.end?C.blue:C.muted),padding:"10px 6px",opacity:(punching||!testPunch.start||testPunch.end)?0.6:1}}>📍 {punching==="test-out"?"確認中…":"退勤テスト"}</button>
+      </div>
+      {(testPunch.start||testPunch.end)&&<div style={{fontSize:12,fontWeight:800,color:C.green,marginTop:8}}>テスト表示：{testPunch.start||"—"}〜{testPunch.end||"退勤前"}</div>}
+      {testNotice&&<div style={{fontSize:11,lineHeight:1.5,color:testNotice.includes("成功")?C.green:C.amber,background:"#fff",borderRadius:7,padding:"7px 9px",marginTop:8}}>{testNotice}</div>}
+    </div>}
     {myS.length===0&&<p style={{color:C.muted,fontSize:13}}>入力できる記録がありません</p>}
     {myS.map(item=>{
       const {d,venue,key,rec}=item,wdi=getWdayI(year,month,d),isE=ed?.key===key;
