@@ -55,7 +55,7 @@ const STUDY_RATE = 3000;  // 勉強会費用（1時間）
 const DEFAULT_SUPPORT_PASS = "1234";
 const APP_NAME = "Compass";
 const APP_SUBTITLE = "仕事・成長・チームをつなぐ";
-const DEV_BUILD_LABEL = "Sprint 28 Build 20260820.1";
+const DEV_BUILD_LABEL = "Sprint 28 Build 20260820.2";
 const APP_ENV_LABEL = "本番";
 const SUPPORT_SKILL_GROUPS = [
   {id:"concierge", title:"コンシェルジュ業務", items:[
@@ -448,6 +448,17 @@ const ASUKA_VENUE_ALIASES = {
   "蔵王":"蔵王斎場",
   "小さな蔵王":"蔵王斎場",
   "小さなお葬式蔵王":"蔵王斎場",
+  "慈愛想 あしべの杜":"あしべの杜",
+  "慈愛想あしべの杜":"あしべの杜",
+  "追憶":"追憶の杜",
+  "慈愛想 追憶の杜":"追憶の杜",
+  "慈愛想追憶の杜":"追憶の杜",
+  "府中":"メモリアルホール府中",
+  "府中メモリアルホール":"メモリアルホール府中",
+  "ふかしな":"神辺ふかしな葬祭 御領ホール",
+  "ふかしな葬祭":"神辺ふかしな葬祭 御領ホール",
+  "神辺ふかしな葬祭":"神辺ふかしな葬祭 御領ホール",
+  "御領ホール":"神辺ふかしな葬祭 御領ホール",
 };
 const normalizeAsukaVenueName = name => ASUKA_VENUE_ALIASES[String(name||"").trim()] || String(name||"").trim();
 // 出退勤打刻用の会場位置。住所は飛鳥会館公式サイト、座標は公式地図リンクで照合済み。
@@ -459,6 +470,10 @@ const ASUKA_VENUE_GEOFENCES = {
   "多治米北斎場":{address:"広島県福山市多治米町1丁目10-9",lat:34.4746751,lng:133.3810684,radiusMeters:150},
   "多治米斎場":{address:"広島県福山市多治米町5丁目28-11",lat:34.4637262,lng:133.3767497,radiusMeters:150},
   "蔵王斎場":{address:"広島県福山市南蔵王町4丁目4-5",lat:34.4990971,lng:133.3917572,radiusMeters:150},
+  "あしべの杜":{address:"広島県福山市新市町新市289-3",lat:34.550865,lng:133.276031,radiusMeters:150},
+  "追憶の杜":{address:"広島県福山市新市町宮内57",lat:34.565071,lng:133.273422,radiusMeters:150},
+  "メモリアルホール府中":{address:"広島県府中市高木町119",lat:34.564499,lng:133.247971,radiusMeters:150},
+  "神辺ふかしな葬祭 御領ホール":{address:"広島県福山市神辺町上御領569-1",lat:34.568596,lng:133.404999,radiusMeters:150},
 };
 const getVenueGeofence = venueName => ASUKA_VENUE_GEOFENCES[normalizeAsukaVenueName(venueName)]||null;
 const geoDistanceMeters=(lat1,lng1,lat2,lng2)=>{
@@ -3989,7 +4004,7 @@ function MyRecord({year,month,shifts,att,sv,uname,cfg,vconf}){
     <h3 style={{margin:"0 0 4px",fontSize:15}}>出勤・退勤打刻</h3>
     <p style={{color:C.muted,fontSize:12,margin:"0 0 10px",lineHeight:1.6}}>勤務先で「出勤する」「退勤する」を押してください。位置情報はボタンを押した瞬間だけ取得し、常時追跡はしません。</p>
     <div style={{background:"#eff6ff",border:`1px solid ${C.blue}`,borderRadius:9,padding:"9px 12px",fontSize:11,color:C.blue,marginBottom:14,lineHeight:1.6}}>
-      📍 対応会場：東手城・春日・花園・多治米北・多治米・蔵王（各会場から基本150m以内）<br/>位置情報を取得できない場合や過去日の修正は、従来どおり時間を手入力できます。
+      📍 対応会場：飛鳥会館6会場、あしべの杜、追憶の杜、メモリアルホール府中、神辺ふかしな葬祭 御領ホール（各会場から基本150m以内）<br/>位置情報を取得できない場合や過去日の修正は、従来どおり時間を手入力できます。
     </div>
     {myS.length===0&&<p style={{color:C.muted,fontSize:13}}>入力できる記録がありません</p>}
     {myS.map(item=>{
@@ -7419,6 +7434,6 @@ function MCConfigTab({ cfg, sv }) {
 
 ReactDOM.createRoot(document.getElementById('root')).render(<App/>);
 </script>
-<div aria-hidden="true" style="position:fixed;right:12px;bottom:max(8px,env(safe-area-inset-bottom));z-index:9999;pointer-events:none;opacity:.82;font-size:12px;line-height:1.35;color:#92400e;background:#fffbeb;border:1px solid #f59e0b;border-radius:6px;padding:4px 8px;text-align:left;font-weight:800;">本番<br>Sprint 28<br>Build 20260820.1</div>
+<div aria-hidden="true" style="position:fixed;right:12px;bottom:max(8px,env(safe-area-inset-bottom));z-index:9999;pointer-events:none;opacity:.82;font-size:12px;line-height:1.35;color:#92400e;background:#fffbeb;border:1px solid #f59e0b;border-radius:6px;padding:4px 8px;text-align:left;font-weight:800;">本番<br>Sprint 28<br>Build 20260820.2</div>
 </body>
 </html>
