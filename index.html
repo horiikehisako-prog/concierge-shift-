@@ -3634,12 +3634,16 @@ function OfficeView(P){
 // STAFF VIEW
 // ═══════════════════════════════════════════════════════════════
 function StaffView(P){
-  const [tab,setTab]=useState("wish");
+  const now=new Date();
+  const hasTodayShift=P.year===now.getFullYear()&&P.month===now.getMonth()+1&&
+    getConciergeAssignments(P.shifts,now.getDate(),P.cfg).some(a=>a.staff===P.uname);
+  // 名前を選んだ当日に勤務がある場合は、打刻場所を探さなくてよいよう最初に表示する。
+  const [tab,setTab]=useState(()=>hasTodayShift?"rec":"wish");
   const tabs=[
     {id:"wish", label:"🙋 出勤希望"},
     {id:"shift",label:"📅 全体シフト"},
     {id:"mine", label:"👤 マイシフト"},
-    {id:"rec",  label:"🕐 出勤記録"},
+    {id:"rec",  label:"📍 出勤・退勤打刻"},
     {id:"employment",label:"📄 雇用・契約"},
   ];
   return <div><MonthSel {...P}/><Tabs tabs={tabs} active={tab} onChange={setTab}/>
