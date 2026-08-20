@@ -55,7 +55,7 @@ const STUDY_RATE = 3000;  // 勉強会費用（1時間）
 const DEFAULT_SUPPORT_PASS = "1234";
 const APP_NAME = "Compass";
 const APP_SUBTITLE = "仕事・成長・チームをつなぐ";
-const DEV_BUILD_LABEL = "Sprint 28 Build 20260819.3";
+const DEV_BUILD_LABEL = "Sprint 28 Build 20260820.1";
 const APP_ENV_LABEL = "本番";
 const SUPPORT_SKILL_GROUPS = [
   {id:"concierge", title:"コンシェルジュ業務", items:[
@@ -450,6 +450,24 @@ const ASUKA_VENUE_ALIASES = {
   "小さなお葬式蔵王":"蔵王斎場",
 };
 const normalizeAsukaVenueName = name => ASUKA_VENUE_ALIASES[String(name||"").trim()] || String(name||"").trim();
+// 出退勤打刻用の会場位置。住所は飛鳥会館公式サイト、座標は公式地図リンクで照合済み。
+// GPSの揺れを考慮し、初期の打刻可能範囲は各会場150mとする。
+const ASUKA_VENUE_GEOFENCES = {
+  "東手城斎場":{address:"広島県福山市東手城町1丁目2-45",lat:34.4883586,lng:133.4010635,radiusMeters:150},
+  "春日斎場":{address:"広島県福山市春日町2丁目1-54",lat:34.5074680,lng:133.4085357,radiusMeters:150},
+  "花園斎場":{address:"広島県福山市花園町2丁目1-3",lat:34.4819929,lng:133.3738991,radiusMeters:150},
+  "多治米北斎場":{address:"広島県福山市多治米町1丁目10-9",lat:34.4746751,lng:133.3810684,radiusMeters:150},
+  "多治米斎場":{address:"広島県福山市多治米町5丁目28-11",lat:34.4637262,lng:133.3767497,radiusMeters:150},
+  "蔵王斎場":{address:"広島県福山市南蔵王町4丁目4-5",lat:34.4990971,lng:133.3917572,radiusMeters:150},
+};
+const getVenueGeofence = venueName => ASUKA_VENUE_GEOFENCES[normalizeAsukaVenueName(venueName)]||null;
+const geoDistanceMeters=(lat1,lng1,lat2,lng2)=>{
+  const toRad=n=>n*Math.PI/180,R=6371000;
+  const dLat=toRad(lat2-lat1),dLng=toRad(lng2-lng1);
+  const a=Math.sin(dLat/2)**2+Math.cos(toRad(lat1))*Math.cos(toRad(lat2))*Math.sin(dLng/2)**2;
+  return Math.round(R*2*Math.atan2(Math.sqrt(a),Math.sqrt(1-a)));
+};
+const localTimeHHMM=date=>`${p2(date.getHours())}:${p2(date.getMinutes())}`;
 const EVENT_EXTRA_VENUES = ASUKA_VENUES;
 const getEventVenueOptions = cfg => Array.from(new Set([
   ...(cfg?.venues||[]).map(v=>normalizeAsukaVenueName(v.name)),...EVENT_EXTRA_VENUES
@@ -2755,7 +2773,10 @@ function AdminAttView({year,month,att:attProp,shifts,vconf,cfg,sv}){
     if(rec||a.staff)allRows.push({d,venue,venueKey:a.venueKey,sched:a.staff,rec,key:a.key});
   }
   const rows=venueFilter==="all"?allRows:allRows.filter(r=>r.venueKey===venueFilter);
-  const verify=key=>sv.att({...att,[key]:{...att[key],verified:true,verifiedAt:new Date().toISOString()}});
+  const verify=key=>{
+    if(!att[key]?.start||!att[key]?.end)return;
+    sv.att({...att,[key]:{...att[key],verified:true,verifiedAt:new Date().toISOString()}});
+  };
   const saveEdit=()=>{
     if(!ed)return;
     const existing=att[ed.key]||{submittedAt:new Date().toISOString()};
@@ -2799,24 +2820,27 @@ function AdminAttView({year,month,att:attProp,shifts,vconf,cfg,sv}){
           <th style={TH}>予定</th><th style={TH}>実際</th><th style={TH}>時間</th><th style={TH}>状態</th>
         </tr></thead>
         <tbody>{rows.map(({d,venue,sched,rec,key})=>{
-          const wdi=getWdayI(year,month,d),h=rec?parseHours(rec.start,rec.end,rec.breakMin??60):null;
+          const wdi=getWdayI(year,month,d),isComplete=!!(rec?.start&&rec?.end),h=isComplete?parseHours(rec.start,rec.end,rec.breakMin??60):null;
           const isEd=ed?.key===key;
           return <React.Fragment key={key}>
             <tr style={{background:rec?.verified?"#f0fdf4":"#fff",cursor:rec?"pointer":"default"}}
-              onClick={()=>rec&&!isEd&&setEd({key,staff:rec.staff||sched,s:rec.start,e:rec.end,b:rec.breakMin??60,venue:venue})}>
+              onClick={()=>rec&&!isEd&&setEd({key,staff:rec.staff||sched,s:rec.start||"09:00",e:rec.end||"16:00",b:rec.breakMin??60,venue:venue})}>
               <td style={{...TD,textAlign:"center",fontWeight:700}}>{month}/{d}</td>
               <td style={{...TD,textAlign:"center",fontWeight:700,color:wdi===0?C.sun:wdi===6?C.sat:C.muted}}>{getWday(year,month,d)}</td>
               <td style={TD}>{venue}</td><td style={TD}>{sched||"-"}</td>
               <td style={{...TD,fontWeight:600}}>{rec?.staff||<span style={{color:C.muted,fontWeight:400}}>未入力</span>}</td>
-              <td style={{...TD,color:C.muted}}>{rec?`${rec.start}〜${rec.end} 休憩${rec.breakMin??60}分（実働${h}h)`:"−"}</td>
+              <td style={{...TD,color:C.muted}}>{!rec?"−":<div>
+                <div>{rec.start||"未打刻"}〜{rec.end||"退勤前"}{isComplete?` 休憩${rec.breakMin??60}分（実働${h}h）`:""}</div>
+                {(rec.clockInGeo||rec.clockOutGeo)&&<div style={{fontSize:10,color:C.green,marginTop:2}}>📍 GPS打刻{rec.clockInGeo?` 出勤${rec.clockInGeo.distanceMeters}m`:""}{rec.clockOutGeo?`・退勤${rec.clockOutGeo.distanceMeters}m`:""}</div>}
+              </div>}</td>
               <td style={{...TD,textAlign:"center"}}>
                 {!rec&&<button onClick={e=>{e.stopPropagation();setEd({key,staff:sched,s:"09:00",e:"16:00",b:60,venue:venue});}} style={{...Btn(C.amber),fontSize:11,padding:"4px 8px"}}>入力</button>}
                 {rec&&!rec.verified&&<div style={{display:"flex",gap:4,justifyContent:"center",flexWrap:"wrap"}}>
-                  <button onClick={e=>{e.stopPropagation();setEd({key,staff:rec.staff||sched,s:rec.start,e:rec.end,b:rec.breakMin??60,venue:venue});}} style={{...Btn(C.blue),fontSize:11,padding:"4px 8px"}}>修正</button>
-                  <button onClick={e=>{e.stopPropagation();verify(key);}} style={{...Btn(C.purple),fontSize:11,padding:"4px 8px"}}>承認</button>
+                  <button onClick={e=>{e.stopPropagation();setEd({key,staff:rec.staff||sched,s:rec.start||"09:00",e:rec.end||"16:00",b:rec.breakMin??60,venue:venue});}} style={{...Btn(C.blue),fontSize:11,padding:"4px 8px"}}>修正</button>
+                  {isComplete?<button onClick={e=>{e.stopPropagation();verify(key);}} style={{...Btn(C.purple),fontSize:11,padding:"4px 8px"}}>承認</button>:<span style={{fontSize:10,color:C.amber,fontWeight:700}}>退勤待ち</span>}
                 </div>}
                 {rec?.verified&&<div style={{display:"flex",gap:4,justifyContent:"center",flexWrap:"wrap"}}>
-                  <button onClick={e=>{e.stopPropagation();setEd({key,staff:rec.staff||sched,s:rec.start,e:rec.end,b:rec.breakMin??60,venue:venue});}} style={{...Btn(C.muted),fontSize:11,padding:"4px 8px"}}>修正</button>
+                  <button onClick={e=>{e.stopPropagation();setEd({key,staff:rec.staff||sched,s:rec.start||"09:00",e:rec.end||"16:00",b:rec.breakMin??60,venue:venue});}} style={{...Btn(C.muted),fontSize:11,padding:"4px 8px"}}>修正</button>
                   <span style={{color:C.green,fontSize:12,fontWeight:700}}>✅</span>
                 </div>}
               </td>
@@ -3899,38 +3923,97 @@ function MyShift({year,month,shifts,vconf,uname,cfg}){
   </div>;
 }
 
-function MyRecord({year,month,shifts,att,sv,uname,cfg}){
+function MyRecord({year,month,shifts,att,sv,uname,cfg,vconf}){
   const days=getDays(year,month),today=new Date();
   const [ed,setEd]=useState(null);
+  const [punching,setPunching]=useState("");
+  const [geoNotice,setGeoNotice]=useState({});
   const myS=[];
   for(let d=1;d<=days;d++){
     if(year===today.getFullYear()&&month===today.getMonth()+1&&d>today.getDate())continue;
     for(const a of getConciergeAssignments(shifts,d,cfg)){
-      if(a.staff===uname)myS.push({d,venue:a.venue,key:a.key,rec:att[a.key]});
+      if(a.staff!==uname)continue;
+      let venue=a.venue;
+      if(!a.isEvent&&a.venueConfig?.options?.length){
+        const confirmed=typeof vconf?.[d]==="string"?vconf[d]:vconf?.[d]?.[a.venue];
+        if(confirmed) venue=confirmed;
+      }
+      myS.push({d,venue:normalizeAsukaVenueName(venue),key:a.key,rec:att[a.key]});
     }
   }
+  const isToday=d=>year===today.getFullYear()&&month===today.getMonth()+1&&d===today.getDate();
+  const locate=()=>new Promise((resolve,reject)=>{
+    if(!navigator.geolocation){reject(new Error("この端末では位置情報を利用できません"));return;}
+    navigator.geolocation.getCurrentPosition(resolve,err=>{
+      const msg=err.code===1?"位置情報が許可されていません。スマホの設定でCompassの位置情報を許可してください":
+        err.code===2?"現在地を取得できませんでした。屋外や窓の近くで、もう一度お試しください":
+        "位置情報の取得に時間がかかりました。もう一度お試しください";
+      reject(new Error(msg));
+    },{enableHighAccuracy:true,timeout:15000,maximumAge:0});
+  });
+  const punch=async({d,venue,key,rec},kind)=>{
+    const fence=getVenueGeofence(venue);
+    if(!isToday(d)){setGeoNotice({...geoNotice,[key]:"打刻は勤務当日のみ行えます。過去日の修正は下の『時間を修正』をご利用ください"});return;}
+    if(!fence){setGeoNotice({...geoNotice,[key]:`${venue||"この勤務場所"}は位置情報が未登録です。時間を手入力してください`});return;}
+    setPunching(`${key}-${kind}`);setGeoNotice({...geoNotice,[key]:"現在地を確認しています…"});
+    try{
+      const pos=await locate(),{latitude,longitude,accuracy}=pos.coords;
+      const distance=geoDistanceMeters(latitude,longitude,fence.lat,fence.lng);
+      // 建物内GPSの揺れを75mまで吸収しつつ、無制限には広げない。
+      const allowedDistance=fence.radiusMeters+Math.min(Math.max(Math.round(accuracy||0),0),75);
+      if(distance>allowedDistance){
+        setGeoNotice(n=>({...n,[key]:`現在地は${venue}から約${distance}mです。打刻範囲（基本${fence.radiusMeters}m）内で、もう一度お試しください。難しい場合は時間を手入力してください`}));
+        return;
+      }
+      const now=new Date(),geo={venue,address:fence.address,latitude,longitude,accuracyMeters:Math.round(accuracy||0),distanceMeters:distance,radiusMeters:fence.radiusMeters,capturedAt:now.toISOString()};
+      if(kind==="in"){
+        const next={...(rec||{}),staff:uname,start:localTimeHHMM(now),breakMin:rec?.breakMin??60,clockInAt:now.toISOString(),clockInGeo:geo,verified:false};
+        await sv.att({...att,[key]:next});
+        setGeoNotice(n=>({...n,[key]:`出勤を${localTimeHHMM(now)}に記録しました（${venue}から約${distance}m）`}));
+      }else{
+        const next={...(rec||{}),staff:uname,end:localTimeHHMM(now),breakMin:rec?.breakMin??60,clockOutAt:now.toISOString(),clockOutGeo:geo,submittedAt:now.toISOString(),verified:false};
+        await sv.att({...att,[key]:next});
+        setGeoNotice(n=>({...n,[key]:`退勤を${localTimeHHMM(now)}に記録しました（${venue}から約${distance}m）`}));
+      }
+    }catch(e){
+      setGeoNotice(n=>({...n,[key]:e.message||"位置情報を取得できませんでした"}));
+    }finally{setPunching("");}
+  };
   const submit=()=>{
     if(!ed)return;
-    sv.att({...att,[ed.key]:{staff:uname,start:ed.s,end:ed.e,breakMin:ed.b,submittedAt:new Date().toISOString(),verified:false}});
+    const previous=att[ed.key]||{};
+    sv.att({...att,[ed.key]:{...previous,staff:uname,start:ed.s,end:ed.e,breakMin:ed.b,submittedAt:new Date().toISOString(),verified:false,manualCorrection:true}});
     setEd(null);
   };
   return <div style={GC}>
-    <h3 style={{margin:"0 0 4px",fontSize:15}}>出勤記録の入力</h3>
-    <p style={{color:C.muted,fontSize:12,margin:"0 0 16px"}}>出勤した日の実際の時間を入力してください</p>
+    <h3 style={{margin:"0 0 4px",fontSize:15}}>出勤・退勤打刻</h3>
+    <p style={{color:C.muted,fontSize:12,margin:"0 0 10px",lineHeight:1.6}}>勤務先で「出勤する」「退勤する」を押してください。位置情報はボタンを押した瞬間だけ取得し、常時追跡はしません。</p>
+    <div style={{background:"#eff6ff",border:`1px solid ${C.blue}`,borderRadius:9,padding:"9px 12px",fontSize:11,color:C.blue,marginBottom:14,lineHeight:1.6}}>
+      📍 対応会場：東手城・春日・花園・多治米北・多治米・蔵王（各会場から基本150m以内）<br/>位置情報を取得できない場合や過去日の修正は、従来どおり時間を手入力できます。
+    </div>
     {myS.length===0&&<p style={{color:C.muted,fontSize:13}}>入力できる記録がありません</p>}
-    {myS.map(({d,venue,key,rec})=>{
-      const wdi=getWdayI(year,month,d),isE=ed?.key===key;
-      const h=rec?parseHours(rec.start,rec.end,rec.breakMin??60):null;
-      return <div key={key} style={{borderBottom:`1px solid ${C.border}`,padding:"12px 0"}}>
+    {myS.map(item=>{
+      const {d,venue,key,rec}=item,wdi=getWdayI(year,month,d),isE=ed?.key===key;
+      const h=rec?.start&&rec?.end?parseHours(rec.start,rec.end,rec.breakMin??60):null;
+      const canPunch=isToday(d)&&!!getVenueGeofence(venue)&&!rec?.verified;
+      return <div key={key} style={{borderBottom:`1px solid ${C.border}`,padding:"13px 0"}}>
         <div style={{display:"flex",alignItems:"center",gap:8,flexWrap:"wrap"}}>
           <span style={{fontWeight:700,color:wdi===0?C.sun:wdi===6?C.sat:C.text}}>{month}/{d}({getWday(year,month,d)})</span>
-          <span style={{color:C.muted,fontSize:13}}>{venue}</span>
+          <span style={{color:C.muted,fontSize:13}}>📍 {venue}</span>
           {rec?.verified&&<span style={{color:C.green,fontSize:12,fontWeight:700}}>✅ 承認済</span>}
-          {rec&&!rec.verified&&<span style={{color:C.blue,fontSize:12}}>{rec.start}〜{rec.end}（休憩{rec.breakMin??60}分・実働{h}h）</span>}
-          {!rec?.verified&&<button onClick={()=>setEd({key,s:rec?.start||"09:00",e:rec?.end||"16:00",b:rec?.breakMin??60})}
-            style={{...Btn(isE?C.muted:C.blue),marginLeft:"auto",fontSize:12,padding:"5px 12px"}}>{rec?"修正":"入力"}</button>}
+          {rec?.start&&!rec?.end&&<span style={{color:C.blue,fontSize:12,fontWeight:700}}>出勤 {rec.start}（退勤前）</span>}
+          {rec?.start&&rec?.end&&!rec?.verified&&<span style={{color:C.blue,fontSize:12}}>{rec.start}〜{rec.end}（休憩{rec.breakMin??60}分・実働{h}h）</span>}
         </div>
-        {isE&&<div style={{display:"flex",gap:8,alignItems:"center",marginTop:10,flexWrap:"wrap"}}>
+        {canPunch&&<div style={{display:"grid",gridTemplateColumns:"repeat(2,minmax(0,1fr))",gap:8,marginTop:10}}>
+          <button disabled={!!punching||!!rec?.start} onClick={()=>punch(item,"in")}
+            style={{...Btn(rec?.start?C.muted:C.green),padding:"11px 8px",opacity:(punching||rec?.start)?0.6:1}}>📍 {punching===`${key}-in`?"確認中…":"出勤する"}</button>
+          <button disabled={!!punching||!rec?.start||!!rec?.end} onClick={()=>punch(item,"out")}
+            style={{...Btn(rec?.start&&!rec?.end?C.blue:C.muted),padding:"11px 8px",opacity:(punching||!rec?.start||rec?.end)?0.6:1}}>📍 {punching===`${key}-out`?"確認中…":"退勤する"}</button>
+        </div>}
+        {geoNotice[key]&&<div style={{fontSize:11,color:geoNotice[key].includes("記録しました")?C.green:C.amber,background:"#fffbeb",borderRadius:7,padding:"7px 9px",marginTop:8,lineHeight:1.5}}>{geoNotice[key]}</div>}
+        {!rec?.verified&&<div style={{marginTop:8,textAlign:"right"}}><button onClick={()=>setEd({key,s:rec?.start||"09:00",e:rec?.end||"16:00",b:rec?.breakMin??60})}
+          style={{...Btn("transparent",C.blue),border:`1px solid ${C.border}`,fontSize:11,padding:"5px 10px"}}>{isE?"修正欄を閉じる":"時間を手入力・修正"}</button></div>}
+        {isE&&<div style={{display:"flex",gap:8,alignItems:"center",marginTop:10,flexWrap:"wrap",background:"#f8fafc",borderRadius:8,padding:10}}>
           <label style={{fontSize:12,fontWeight:600}}>開始</label>
           <input type="time" value={ed.s} onChange={e=>setEd({...ed,s:e.target.value})}
             style={{border:`1px solid ${C.border}`,borderRadius:6,padding:"5px 8px",fontSize:14}}/>
@@ -3940,13 +4023,9 @@ function MyRecord({year,month,shifts,att,sv,uname,cfg}){
           <label style={{fontSize:12,fontWeight:600}}>休憩</label>
           <select value={ed.b} onChange={e=>setEd({...ed,b:Number(e.target.value)})}
             style={{border:`1px solid ${C.border}`,borderRadius:6,padding:"5px 8px",fontSize:14}}>
-            {[0,15,30,45,60].map(m=>(
-              <option key={m} value={m}>{m}分</option>
-            ))}
+            {[0,15,30,45,60].map(m=><option key={m} value={m}>{m}分</option>)}
           </select>
-          <div style={{fontSize:12,color:C.green,fontWeight:700}}>
-            実働 {parseHours(ed.s,ed.e,ed.b)}h
-          </div>
+          <div style={{fontSize:12,color:C.green,fontWeight:700}}>実働 {parseHours(ed.s,ed.e,ed.b)}h</div>
           <button onClick={submit} style={Btn(C.green)}>保存</button>
           <button onClick={()=>setEd(null)} style={{...Btn("transparent",C.muted),border:`1px solid ${C.border}`}}>キャンセル</button>
         </div>}
@@ -4060,7 +4139,10 @@ function VenueAtt({year,month,att,shifts,cfg,sv,flash}){
     const rec=att[a.key];
     if(rec||a.staff)rows.push({d,venue:a.venue,sched:a.staff,rec,key:a.key});
   }
-  const verify=key=>{sv.att({...att,[key]:{...att[key],verified:true,verifiedAt:new Date().toISOString()}});flash("✅ 承認しました");};
+  const verify=key=>{
+    if(!att[key]?.start||!att[key]?.end){flash("退勤打刻が済んでから承認してください");return;}
+    sv.att({...att,[key]:{...att[key],verified:true,verifiedAt:new Date().toISOString()}});flash("✅ 承認しました");
+  };
   return <div>
     <div style={{...GC,display:"flex",gap:20,alignItems:"center",flexWrap:"wrap"}}>
       {[["未入力",rows.filter(r=>!r.rec).length,C.amber],
@@ -4077,16 +4159,19 @@ function VenueAtt({year,month,att,shifts,cfg,sv,flash}){
           <th style={TH}>コンシェルジュ</th><th style={TH}>時間</th><th style={TH}>状態</th>
         </tr></thead>
         <tbody>{rows.map(({d,venue,sched,rec,key})=>{
-          const wdi=getWdayI(year,month,d);
+          const wdi=getWdayI(year,month,d),isComplete=!!(rec?.start&&rec?.end);
           return <tr key={key} style={{background:rec?.verified?"#f0fdf4":"#fff"}}>
             <td style={{...TD,textAlign:"center",fontWeight:700}}>{month}/{d}</td>
             <td style={{...TD,textAlign:"center",fontWeight:700,color:wdi===0?C.sun:wdi===6?C.sat:C.muted}}>{getWday(year,month,d)}</td>
             <td style={TD}>{venue}</td>
             <td style={{...TD,fontWeight:600}}>{rec?.staff||sched||"−"}</td>
-            <td style={{...TD,color:C.muted}}>{rec?`${rec.start}〜${rec.end}`:"未入力"}</td>
+            <td style={{...TD,color:C.muted}}>{!rec?"未入力":<div>
+              <div>{rec.start||"未打刻"}〜{rec.end||"退勤前"}</div>
+              {(rec.clockInGeo||rec.clockOutGeo)&&<div style={{fontSize:10,color:C.green,marginTop:2}}>📍 GPS打刻{rec.clockInGeo?` 出勤${rec.clockInGeo.distanceMeters}m`:""}{rec.clockOutGeo?`・退勤${rec.clockOutGeo.distanceMeters}m`:""}</div>}
+            </div>}</td>
             <td style={{...TD,textAlign:"center"}}>
               {!rec&&<span style={{color:C.amber,fontSize:12,fontWeight:600}}>未入力</span>}
-              {rec&&!rec.verified&&<button onClick={()=>verify(key)} style={{...Btn(C.purple),fontSize:12,padding:"5px 12px"}}>承認する</button>}
+              {rec&&!rec.verified&&(isComplete?<button onClick={()=>verify(key)} style={{...Btn(C.purple),fontSize:12,padding:"5px 12px"}}>承認する</button>:<span style={{color:C.amber,fontSize:12,fontWeight:700}}>退勤待ち</span>)}
               {rec?.verified&&<span style={{color:C.green,fontSize:12,fontWeight:700}}>✅ 承認済</span>}
             </td>
           </tr>;
@@ -7334,6 +7419,6 @@ function MCConfigTab({ cfg, sv }) {
 
 ReactDOM.createRoot(document.getElementById('root')).render(<App/>);
 </script>
-<div aria-hidden="true" style="position:fixed;right:12px;bottom:max(8px,env(safe-area-inset-bottom));z-index:9999;pointer-events:none;opacity:.82;font-size:12px;line-height:1.35;color:#92400e;background:#fffbeb;border:1px solid #f59e0b;border-radius:6px;padding:4px 8px;text-align:left;font-weight:800;">本番<br>Sprint 28<br>Build 20260819.3</div>
+<div aria-hidden="true" style="position:fixed;right:12px;bottom:max(8px,env(safe-area-inset-bottom));z-index:9999;pointer-events:none;opacity:.82;font-size:12px;line-height:1.35;color:#92400e;background:#fffbeb;border:1px solid #f59e0b;border-radius:6px;padding:4px 8px;text-align:left;font-weight:800;">本番<br>Sprint 28<br>Build 20260820.1</div>
 </body>
 </html>
