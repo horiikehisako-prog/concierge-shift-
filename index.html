@@ -55,7 +55,7 @@ const STUDY_RATE = 3000;  // 勉強会費用（1時間）
 const DEFAULT_SUPPORT_PASS = "1234";
 const APP_NAME = "Compass";
 const APP_SUBTITLE = "仕事・成長・チームをつなぐ";
-const DEV_BUILD_LABEL = "Sprint 28 Build 20260820.5";
+const DEV_BUILD_LABEL = "Sprint 28 Build 20260820.6";
 const APP_ENV_LABEL = location.hostname==="concierge-shift-prod.vercel.app" ? "本番" : "確認版";
 const SUPPORT_SKILL_GROUPS = [
   {id:"concierge", title:"コンシェルジュ業務", items:[
@@ -4032,7 +4032,7 @@ function MyRecord({year,month,shifts,att,sv,uname,cfg,vconf}){
     <div style={{background:"#eff6ff",border:`1px solid ${C.blue}`,borderRadius:9,padding:"9px 12px",fontSize:11,color:C.blue,marginBottom:14,lineHeight:1.6}}>
       📍 対応会場：飛鳥会館6会場、あしべの杜、追憶の杜、メモリアルホール府中、神辺ふかしな葬祭 御領ホール（各会場から基本150m以内）<br/>位置情報を取得できない場合や過去日の修正は、従来どおり時間を手入力できます。
     </div>
-    {APP_ENV_LABEL==="確認版"&&staffNameKey(uname)===staffNameKey("堀池 久子")&&<div style={{background:"#fff7ed",border:`1px solid ${C.amber}`,borderRadius:10,padding:12,marginBottom:14}}>
+    {staffNameKey(uname)===staffNameKey("堀池 久子")&&<div style={{background:"#fff7ed",border:`1px solid ${C.amber}`,borderRadius:10,padding:12,marginBottom:14}}>
       <div style={{fontWeight:900,color:"#9a3412",marginBottom:4}}>🧪 保存しない打刻テスト</div>
       <div style={{fontSize:11,color:C.muted,lineHeight:1.5,marginBottom:9}}>シフトや出勤記録には一切保存されません。会場を選び、位置情報の許可と打刻範囲の判定を確認できます。</div>
       <select value={testVenue} onChange={e=>{setTestVenue(e.target.value);setTestPunch({start:"",end:""});setTestNotice("");}}
