@@ -55,8 +55,8 @@ const STUDY_RATE = 3000;  // 勉強会費用（1時間）
 const DEFAULT_SUPPORT_PASS = "1234";
 const APP_NAME = "Compass";
 const APP_SUBTITLE = "仕事・成長・チームをつなぐ";
-const DEV_BUILD_LABEL = "Sprint 28 Build 20260820.2";
-const APP_ENV_LABEL = "本番";
+const DEV_BUILD_LABEL = "Sprint 28 Build 20260820.3";
+const APP_ENV_LABEL = location.hostname==="concierge-shift-prod.vercel.app" ? "本番" : "確認版";
 const SUPPORT_SKILL_GROUPS = [
   {id:"concierge", title:"コンシェルジュ業務", items:[
     "事前相談のご案内","電話対応","出勤後清掃","出棺後清掃","完全清掃","在庫確認",
@@ -7434,6 +7434,7 @@ function MCConfigTab({ cfg, sv }) {
 
 ReactDOM.createRoot(document.getElementById('root')).render(<App/>);
 </script>
-<div aria-hidden="true" style="position:fixed;right:12px;bottom:max(8px,env(safe-area-inset-bottom));z-index:9999;pointer-events:none;opacity:.82;font-size:12px;line-height:1.35;color:#92400e;background:#fffbeb;border:1px solid #f59e0b;border-radius:6px;padding:4px 8px;text-align:left;font-weight:800;">本番<br>Sprint 28<br>Build 20260820.2</div>
+<div id="compass-build-badge" aria-hidden="true" style="position:fixed;right:12px;bottom:max(8px,env(safe-area-inset-bottom));z-index:9999;pointer-events:none;opacity:.82;font-size:12px;line-height:1.35;color:#92400e;background:#fffbeb;border:1px solid #f59e0b;border-radius:6px;padding:4px 8px;text-align:left;font-weight:800;"></div>
+<script>(function(){var prod=location.hostname==="concierge-shift-prod.vercel.app";document.getElementById("compass-build-badge").innerHTML=(prod?"本番":"確認版")+"<br>Sprint 28<br>Build 20260820.3";}());</script>
 </body>
 </html>
