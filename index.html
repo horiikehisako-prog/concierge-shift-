@@ -55,7 +55,7 @@ const STUDY_RATE = 3000;  // 勉強会費用（1時間）
 const DEFAULT_SUPPORT_PASS = "1234";
 const APP_NAME = "Compass";
 const APP_SUBTITLE = "仕事・成長・チームをつなぐ";
-const DEV_BUILD_LABEL = "Sprint 28 Build 20260820.6";
+const DEV_BUILD_LABEL = "Sprint 28 Build 20260821.1";
 const APP_ENV_LABEL = location.hostname==="concierge-shift-prod.vercel.app" ? "本番" : "確認版";
 const SUPPORT_SKILL_GROUPS = [
   {id:"concierge", title:"コンシェルジュ業務", items:[
@@ -1742,7 +1742,11 @@ const employmentFormatDateTime=value=>{
   const d=new Date(Number(value)||value);
   return Number.isNaN(d.getTime())?String(value):d.toLocaleString("ja-JP",{year:"numeric",month:"2-digit",day:"2-digit",hour:"2-digit",minute:"2-digit"});
 };
-const employmentMoney=value=>`${Number(value||0).toLocaleString("ja-JP")}円`;
+const employmentMoney=value=>{
+  if(value===null||value===undefined||value===""||value==="未設定")return "未設定";
+  const amount=Number(value);
+  return Number.isFinite(amount)?`${amount.toLocaleString("ja-JP")}円`:"未設定";
+};
 const employmentValues=obj=>Object.values(obj||{}).filter(Boolean);
 const employmentParseSnapshot=json=>{try{return JSON.parse(json||"{}");}catch{return {};}};
 const employmentReplaceTemplateTokens=(body,values={})=>Object.entries(values).reduce((text,[key,value])=>{
@@ -1849,7 +1853,7 @@ function EmploymentDocumentBody({snapshot,agreement}){
         <div><b>契約バージョン：</b>{snapshot.contractVersion||"—"}</div><div><b>服務規程バージョン：</b>{snapshot.serviceRuleVersion||"未登録"}</div>
       </div>
     </div>
-    {docs.map((doc,i)=>{const renderedBody=employmentReplaceTemplateTokens(doc.body,{電子同意日時:agreement?employmentFormatDateTime(agreement.agreedAt):"未同意"});return <section key={`${doc.documentId}-${doc.versionId}`} style={{marginBottom:24}}>
+    {docs.map((doc,i)=>{const agreementText=agreement?employmentFormatDateTime(agreement.agreedAt):"未同意";let renderedBody=employmentReplaceTemplateTokens(doc.body,{電子同意日時:agreementText});if(agreement)renderedBody=renderedBody.replace(/(同意日時?[：:\s]*)未設定/g,`$1${agreementText}`);return <section key={`${doc.documentId}-${doc.versionId}`} style={{marginBottom:24}}>
       <h2 style={{fontSize:18,margin:"0 0 4px",color:C.navy}}>{doc.title}</h2>
       <div style={{fontSize:12,color:C.muted,marginBottom:10}}>文書バージョン：{doc.versionLabel}</div>
       <div style={{whiteSpace:"pre-wrap",fontSize:14,lineHeight:1.9,color:"#222"}}>{renderedBody}</div>
@@ -1893,6 +1897,7 @@ function StaffEmploymentInner({uname,staffId,auth}){
   const [checked,setChecked]=useState(false);
   const [typedName,setTypedName]=useState("");
   const [message,setMessage]=useState("");
+  const [agreeing,setAgreeing]=useState(false);
   const load=useCallback(async()=>{
     setLoading(true);
     try{
@@ -1913,11 +1918,14 @@ function StaffEmploymentInner({uname,staffId,auth}){
   const agree=async()=>{
     if(!selected||agreement)return;
     if(!checked){setMessage("確認欄にチェックしてください。");return;}
-    if(typedName.trim()!==selected.staffName){setMessage("氏名は登録されているお名前と同じ表記で入力してください。");return;}
+    if(staffNameKey(typedName)!==staffNameKey(selected.staffName)){setMessage("本人氏名を入力してください。名字と名前の間の空白は、なくても構いません。");return;}
     const agreedAt=Date.now();
-    const record={id:selected.id,issueId:selected.id,staffId,staffName:selected.staffName,typedName:typedName.trim(),contractId:selected.contractId||selected.id,contractVersion:selected.contractVersion||"",serviceRuleVersion:selected.serviceRuleVersion||snapshot.serviceRuleVersion||"未登録",agreedAt,snapshotJson:selected.snapshotJson,hourlyRate:Number(selected.hourlyRate||0),contractStartDate:selected.contractStartDate||"",createdByUid:auth.user.uid};
+    // 発行時の値を型も含めてそのまま保存し、改変防止ルールとの不一致を防ぐ。
+    const record={id:selected.id,issueId:selected.id,staffId,staffName:selected.staffName,typedName:selected.staffName,contractId:selected.contractId||selected.id,contractVersion:selected.contractVersion||"",serviceRuleVersion:selected.serviceRuleVersion||snapshot.serviceRuleVersion||"未登録",agreedAt,snapshotJson:selected.snapshotJson,hourlyRate:selected.hourlyRate??"",contractStartDate:selected.contractStartDate??"",createdByUid:auth.user.uid};
+    setAgreeing(true);setMessage("同意内容を保存しています…");
     try{await employmentRef(`agreements/${staffId}/${selected.id}`).set(record);setMessage("契約内容への同意を保存しました。");setChecked(false);setTypedName("");await load();}
     catch(e){console.error(e);setMessage("同意を保存できませんでした。内容を確認して、もう一度お試しください。");}
+    finally{setAgreeing(false);}
   };
   if(loading)return <div style={GC}>契約情報を読み込んでいます…</div>;
   return <div>
@@ -1949,7 +1957,7 @@ function StaffEmploymentInner({uname,staffId,auth}){
           <label style={{display:"flex",gap:9,alignItems:"flex-start",fontSize:14,fontWeight:700,lineHeight:1.6}}><input type="checkbox" checked={checked} onChange={e=>setChecked(e.target.checked)} style={{marginTop:5,transform:"scale(1.2)"}}/>上記の契約内容および服務規程を確認しました</label>
           <label style={{display:"block",fontSize:12,fontWeight:800,margin:"14px 0 5px"}}>本人氏名</label>
           <input value={typedName} onChange={e=>setTypedName(e.target.value)} placeholder={selected.staffName} style={{width:"100%",maxWidth:420,border:`1px solid ${C.border}`,borderRadius:8,padding:"11px 12px",fontSize:15}}/>
-          <button onClick={agree} style={{...Btn(C.green),display:"block",width:"100%",maxWidth:420,marginTop:12,padding:12}}>同意する</button>
+          <button onClick={agree} disabled={agreeing} style={{...Btn(agreeing?C.muted:C.green),display:"block",width:"100%",maxWidth:420,marginTop:12,padding:12}}>{agreeing?"同意を保存中…":"同意する"}</button>
         </div>}
       </div>}
       <EmploymentPrintSheet issue={selected} agreement={agreement}/>
