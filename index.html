@@ -55,7 +55,7 @@ const STUDY_RATE = 3000;  // 勉強会費用（1時間）
 const DEFAULT_SUPPORT_PASS = "1234";
 const APP_NAME = "Compass";
 const APP_SUBTITLE = "仕事・成長・チームをつなぐ";
-const DEV_BUILD_LABEL = "Sprint 28 Build 20260821.4";
+const DEV_BUILD_LABEL = "Sprint 28 Build 20260821.5";
 const APP_ENV_LABEL = location.hostname==="concierge-shift-prod.vercel.app" ? "本番" : "確認版";
 const SUPPORT_SKILL_GROUPS = [
   {id:"concierge", title:"コンシェルジュ業務", items:[
@@ -1919,7 +1919,8 @@ function StaffEmploymentInner({uname,staffId,auth}){
   const snapshot=selected?employmentParseSnapshot(selected.snapshotJson):{};
   useEffect(()=>{
     if(!selected?.id||agreement||data.views?.[selected.id])return;
-    const viewedAt=Date.now(),view={issueId:selected.id,staffId,viewedAt};
+    // 端末時計のずれでFirebaseの時刻検証に拒否されないよう、サーバー時刻を使う。
+    const viewedAt=firebase.database.ServerValue.TIMESTAMP,view={issueId:selected.id,staffId,viewedAt};
     employmentRef(`documentViews/${staffId}/${selected.id}`).set(view)
       .then(()=>setData(current=>({...current,views:{...(current.views||{}),[selected.id]:view}})))
       .catch(e=>console.error("契約書の閲覧記録を保存できませんでした",e));
@@ -1928,7 +1929,8 @@ function StaffEmploymentInner({uname,staffId,auth}){
     if(!selected||agreement)return;
     if(!checked){setMessage("確認欄にチェックしてください。");return;}
     if(staffNameKey(typedName)!==staffNameKey(selected.staffName)){setMessage("本人氏名を入力してください。名字と名前の間の空白は、なくても構いません。");return;}
-    const agreedAt=Date.now();
+    // 同意時刻は端末時計ではなくFirebaseのサーバー時刻で確定する。
+    const agreedAt=firebase.database.ServerValue.TIMESTAMP;
     // 発行時の値を型も含めてそのまま保存し、改変防止ルールとの不一致を防ぐ。
     const record={id:selected.id,issueId:selected.id,staffId,staffName:selected.staffName,typedName:selected.staffName,contractId:selected.contractId||selected.id,contractVersion:selected.contractVersion||"",serviceRuleVersion:selected.serviceRuleVersion||snapshot.serviceRuleVersion||"未登録",agreedAt,snapshotJson:selected.snapshotJson,hourlyRate:selected.hourlyRate??"",contractStartDate:selected.contractStartDate??"",createdByUid:auth.user.uid};
     setAgreeing(true);setMessage("同意内容を保存しています…");
