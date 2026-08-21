@@ -55,7 +55,7 @@ const STUDY_RATE = 3000;  // 勉強会費用（1時間）
 const DEFAULT_SUPPORT_PASS = "1234";
 const APP_NAME = "Compass";
 const APP_SUBTITLE = "仕事・成長・チームをつなぐ";
-const DEV_BUILD_LABEL = "Sprint 28 Build 20260821.2";
+const DEV_BUILD_LABEL = "Sprint 28 Build 20260821.3";
 const APP_ENV_LABEL = location.hostname==="concierge-shift-prod.vercel.app" ? "本番" : "確認版";
 const SUPPORT_SKILL_GROUPS = [
   {id:"concierge", title:"コンシェルジュ業務", items:[
@@ -1901,9 +1901,11 @@ function StaffEmploymentInner({uname,staffId,auth}){
   const load=useCallback(async()=>{
     setLoading(true);
     try{
-      const [profile,issues,agreements,views]=await Promise.all([
-        employmentRead(`staffProfiles/${staffId}`),employmentRead(`issues/${staffId}`),employmentRead(`agreements/${staffId}`),employmentRead(`documentViews/${staffId}`)
+      const [profile,issues,agreements]=await Promise.all([
+        employmentRead(`staffProfiles/${staffId}`),employmentRead(`issues/${staffId}`),employmentRead(`agreements/${staffId}`)
       ]);
+      // 閲覧記録用ルールの反映前・一時的な通信失敗でも、契約書本体は必ず表示する。
+      const views=await employmentRead(`documentViews/${staffId}`).catch(()=>null);
       setData({profile,issues:issues||{},agreements:agreements||{},views:views||{}});
       const ids=Object.keys(issues||{}).sort((a,b)=>(issues[b]?.issuedAt||0)-(issues[a]?.issuedAt||0));
       setSelectedId(id=>id||ids[0]||"");
@@ -1989,9 +1991,11 @@ function AdminEmploymentInner({cfg,auth}){
   const load=useCallback(async()=>{
     setLoading(true);
     try{
-      const [documents,versions,profiles,rateHistory,issues,agreements,documentViews,passwordSetup]=await Promise.all([
-        employmentRead("documents"),employmentRead("documentVersions"),employmentRead("staffProfiles"),employmentRead("rateHistory"),employmentRead("issues"),employmentRead("agreements"),employmentRead("documentViews"),employmentRead("passwordSetup")
+      const [documents,versions,profiles,rateHistory,issues,agreements,passwordSetup]=await Promise.all([
+        employmentRead("documents"),employmentRead("documentVersions"),employmentRead("staffProfiles"),employmentRead("rateHistory"),employmentRead("issues"),employmentRead("agreements"),employmentRead("passwordSetup")
       ]);
+      // 閲覧記録だけ取得できない場合も、契約管理全体を止めない。
+      const documentViews=await employmentRead("documentViews").catch(()=>null);
       setData({documents:documents||{},versions:versions||{},profiles:profiles||{},rateHistory:rateHistory||{},issues:issues||{},agreements:agreements||{},documentViews:documentViews||{},passwordSetup:passwordSetup||{}});
       const first=Object.keys(documents||{})[0]||"";setSelectedDocumentId(id=>id||first);
     }catch(e){console.error(e);setMessage("契約管理データを読み込めませんでした。");}
