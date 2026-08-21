@@ -60,6 +60,16 @@
           }
         }
       },
+      "documentViews": {
+        ".read": "auth != null && root.child('access').child(auth.uid).child('role').val() === 'admin'",
+        "$staffId": {
+          ".read": "auth != null && (root.child('access').child(auth.uid).child('role').val() === 'admin' || (root.child('access').child(auth.uid).child('enabled').val() === true && root.child('access').child(auth.uid).child('staffId').val() === $staffId))",
+          "$issueId": {
+            ".write": "auth != null && root.child('access').child(auth.uid).child('enabled').val() === true && root.child('access').child(auth.uid).child('staffId').val() === $staffId && !data.exists() && root.child('employment').child('issues').child($staffId).child($issueId).exists()",
+            ".validate": "newData.hasChildren(['issueId','staffId','viewedAt']) && newData.child('issueId').val() === $issueId && newData.child('staffId').val() === $staffId && newData.child('viewedAt').isNumber() && newData.child('viewedAt').val() <= now && newData.child('viewedAt').val() >= now - 300000"
+          }
+        }
+      },
       "agreements": {
         ".read": "auth != null && root.child('access').child(auth.uid).child('role').val() === 'admin'",
         "$staffId": {

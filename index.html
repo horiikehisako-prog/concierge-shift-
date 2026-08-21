@@ -55,7 +55,7 @@ const STUDY_RATE = 3000;  // 勉強会費用（1時間）
 const DEFAULT_SUPPORT_PASS = "1234";
 const APP_NAME = "Compass";
 const APP_SUBTITLE = "仕事・成長・チームをつなぐ";
-const DEV_BUILD_LABEL = "Sprint 28 Build 20260821.1";
+const DEV_BUILD_LABEL = "Sprint 28 Build 20260821.2";
 const APP_ENV_LABEL = location.hostname==="concierge-shift-prod.vercel.app" ? "本番" : "確認版";
 const SUPPORT_SKILL_GROUPS = [
   {id:"concierge", title:"コンシェルジュ業務", items:[
@@ -1891,7 +1891,7 @@ function StaffEmploymentView({uname,cfg}){
 }
 
 function StaffEmploymentInner({uname,staffId,auth}){
-  const [data,setData]=useState({profile:null,issues:{},agreements:{}});
+  const [data,setData]=useState({profile:null,issues:{},agreements:{},views:{}});
   const [loading,setLoading]=useState(true);
   const [selectedId,setSelectedId]=useState("");
   const [checked,setChecked]=useState(false);
@@ -1901,10 +1901,10 @@ function StaffEmploymentInner({uname,staffId,auth}){
   const load=useCallback(async()=>{
     setLoading(true);
     try{
-      const [profile,issues,agreements]=await Promise.all([
-        employmentRead(`staffProfiles/${staffId}`),employmentRead(`issues/${staffId}`),employmentRead(`agreements/${staffId}`)
+      const [profile,issues,agreements,views]=await Promise.all([
+        employmentRead(`staffProfiles/${staffId}`),employmentRead(`issues/${staffId}`),employmentRead(`agreements/${staffId}`),employmentRead(`documentViews/${staffId}`)
       ]);
-      setData({profile,issues:issues||{},agreements:agreements||{}});
+      setData({profile,issues:issues||{},agreements:agreements||{},views:views||{}});
       const ids=Object.keys(issues||{}).sort((a,b)=>(issues[b]?.issuedAt||0)-(issues[a]?.issuedAt||0));
       setSelectedId(id=>id||ids[0]||"");
     }catch(e){setMessage("契約情報を読み込めませんでした。管理者へご確認ください。");}
@@ -1915,6 +1915,13 @@ function StaffEmploymentInner({uname,staffId,auth}){
   const selected=data.issues?.[selectedId]||issues[0]||null;
   const agreement=selected?data.agreements?.[selected.id]:null;
   const snapshot=selected?employmentParseSnapshot(selected.snapshotJson):{};
+  useEffect(()=>{
+    if(!selected?.id||agreement||data.views?.[selected.id])return;
+    const viewedAt=Date.now(),view={issueId:selected.id,staffId,viewedAt};
+    employmentRef(`documentViews/${staffId}/${selected.id}`).set(view)
+      .then(()=>setData(current=>({...current,views:{...(current.views||{}),[selected.id]:view}})))
+      .catch(e=>console.error("契約書の閲覧記録を保存できませんでした",e));
+  },[selected?.id,agreement,staffId,!!data.views?.[selected?.id]]);
   const agree=async()=>{
     if(!selected||agreement)return;
     if(!checked){setMessage("確認欄にチェックしてください。");return;}
@@ -1974,7 +1981,7 @@ function AdminEmploymentView(P){
 function AdminEmploymentInner({cfg,auth}){
   const directory=employmentStaffDirectory(cfg);
   const [tab,setTab]=useState("staff");
-  const [data,setData]=useState({documents:{},versions:{},profiles:{},rateHistory:{},issues:{},agreements:{}});
+  const [data,setData]=useState({documents:{},versions:{},profiles:{},rateHistory:{},issues:{},agreements:{},documentViews:{},passwordSetup:{}});
   const [loading,setLoading]=useState(true);
   const [message,setMessage]=useState("");
   const [selectedStaffId,setSelectedStaffId]=useState(directory[0]?.staffId||"");
@@ -1982,10 +1989,10 @@ function AdminEmploymentInner({cfg,auth}){
   const load=useCallback(async()=>{
     setLoading(true);
     try{
-      const [documents,versions,profiles,rateHistory,issues,agreements]=await Promise.all([
-        employmentRead("documents"),employmentRead("documentVersions"),employmentRead("staffProfiles"),employmentRead("rateHistory"),employmentRead("issues"),employmentRead("agreements")
+      const [documents,versions,profiles,rateHistory,issues,agreements,documentViews,passwordSetup]=await Promise.all([
+        employmentRead("documents"),employmentRead("documentVersions"),employmentRead("staffProfiles"),employmentRead("rateHistory"),employmentRead("issues"),employmentRead("agreements"),employmentRead("documentViews"),employmentRead("passwordSetup")
       ]);
-      setData({documents:documents||{},versions:versions||{},profiles:profiles||{},rateHistory:rateHistory||{},issues:issues||{},agreements:agreements||{}});
+      setData({documents:documents||{},versions:versions||{},profiles:profiles||{},rateHistory:rateHistory||{},issues:issues||{},agreements:agreements||{},documentViews:documentViews||{},passwordSetup:passwordSetup||{}});
       const first=Object.keys(documents||{})[0]||"";setSelectedDocumentId(id=>id||first);
     }catch(e){console.error(e);setMessage("契約管理データを読み込めませんでした。");}
     finally{setLoading(false);}
@@ -2027,6 +2034,7 @@ function EmploymentStaffManager({cfg,directory,data,selectedStaffId,setSelectedS
   if(!staff)return <div style={GC}>スタッフが登録されていません。</div>;
   const latestIssue=employmentValues(data.issues?.[staff.staffId]).sort((a,b)=>(b.issuedAt||0)-(a.issuedAt||0))[0];
   const latestAgreement=latestIssue?data.agreements?.[staff.staffId]?.[latestIssue.id]:null;
+  const selectedPasswordStatus=!saved.authUid?"アカウント未登録":data.passwordSetup?.[staff.staffId]===true?"仮パスワードのまま":data.passwordSetup?.[staff.staffId]===false?"変更済み":"状況不明";
   const saveProfile=async()=>{
     const previous=Number(saved.currentHourlyRate??fallbackRate??0),nextRate=Number(form.currentHourlyRate||0),now=Date.now();
     const next={...form,staffId:staff.staffId,name:staff.name,role:staff.role,currentHourlyRate:nextRate,updatedAt:now};
@@ -2096,15 +2104,17 @@ function EmploymentStaffManager({cfg,directory,data,selectedStaffId,setSelectedS
   };
   const history=employmentValues(data.rateHistory?.[staff.staffId]).sort((a,b)=>String(b.effectiveDate).localeCompare(String(a.effectiveDate)));
   return <div>
-    <div style={{...GC,overflowX:"auto"}}><table style={{width:"100%",borderCollapse:"collapse",minWidth:850}}><thead><tr><th style={TH}>氏名</th><th style={TH}>契約状況</th><th style={TH}>現在の時給</th><th style={TH}>契約開始日</th><th style={TH}>契約バージョン</th><th style={TH}>同意日時</th><th style={TH}>操作</th></tr></thead><tbody>{directory.map(s=>{
-      const p=data.profiles?.[s.staffId]||{};const issue=employmentValues(data.issues?.[s.staffId]).sort((a,b)=>(b.issuedAt||0)-(a.issuedAt||0))[0];const agreement=issue?data.agreements?.[s.staffId]?.[issue.id]:null;
+    <div style={{...GC,overflowX:"auto"}}><table style={{width:"100%",borderCollapse:"collapse",minWidth:1150}}><thead><tr><th style={TH}>氏名</th><th style={TH}>閲覧状況</th><th style={TH}>同意状況</th><th style={TH}>パスワード</th><th style={TH}>現在の時給</th><th style={TH}>契約開始日</th><th style={TH}>契約バージョン</th><th style={TH}>同意日時</th><th style={TH}>操作</th></tr></thead><tbody>{directory.map(s=>{
+      const p=data.profiles?.[s.staffId]||{};const issue=employmentValues(data.issues?.[s.staffId]).sort((a,b)=>(b.issuedAt||0)-(a.issuedAt||0))[0];const agreement=issue?data.agreements?.[s.staffId]?.[issue.id]:null;const view=issue?data.documentViews?.[s.staffId]?.[issue.id]:null;
+      const viewLabel=agreement?"同意済み":view?"閲覧済み":issue?"未閲覧":"未発行";
+      const passwordLabel=!p.authUid?"未登録":data.passwordSetup?.[s.staffId]===true?"仮パスワード":data.passwordSetup?.[s.staffId]===false?"変更済み":"状況不明";
       const openStaff=()=>{setSelectedStaffId(s.staffId);setTimeout(()=>document.getElementById("employment-staff-detail")?.scrollIntoView({behavior:"smooth",block:"start"}),0);};
-      return <tr key={s.staffId} onClick={openStaff} style={{cursor:"pointer",background:s.staffId===staff.staffId?C.blueL:(!agreement&&issue?C.redL:"transparent")}}><td style={{...TD,fontWeight:700}}>{s.name}</td><td style={{...TD,color:agreement?C.green:issue?C.red:C.muted,fontWeight:800}}>{agreement?"同意済み":issue?"未同意":"未発行"}</td><td style={TD}>{employmentMoney(p.currentHourlyRate??cfg.staffRates?.[s.name])}</td><td style={TD}>{p.contractStartDate||"—"}</td><td style={TD}>{issue?.contractVersion||"—"}</td><td style={TD}>{agreement?employmentFormatDateTime(agreement.agreedAt):"—"}</td><td style={TD}><button type="button" onClick={e=>{e.stopPropagation();openStaff();}} style={{...Btn(C.navy),padding:"7px 11px"}}>表示・設定</button></td></tr>;
+      return <tr key={s.staffId} onClick={openStaff} style={{cursor:"pointer",background:s.staffId===staff.staffId?C.blueL:(!agreement&&issue?C.redL:"transparent")}}><td style={{...TD,fontWeight:700}}>{s.name}</td><td style={{...TD,color:agreement||view?C.green:issue?C.red:C.muted,fontWeight:800}}>{viewLabel}{view&&!agreement?<div style={{fontSize:10,fontWeight:500,marginTop:2}}>{employmentFormatDateTime(view.viewedAt)}</div>:null}</td><td style={{...TD,color:agreement?C.green:issue?C.red:C.muted,fontWeight:800}}>{agreement?"同意済み":issue?"未同意":"未発行"}</td><td style={{...TD,color:passwordLabel==="変更済み"?C.green:passwordLabel==="仮パスワード"?C.amber:C.muted,fontWeight:800}}>{passwordLabel}</td><td style={TD}>{employmentMoney(p.currentHourlyRate??cfg.staffRates?.[s.name])}</td><td style={TD}>{p.contractStartDate||"—"}</td><td style={TD}>{issue?.contractVersion||"—"}</td><td style={TD}>{agreement?employmentFormatDateTime(agreement.agreedAt):"—"}</td><td style={TD}><button type="button" onClick={e=>{e.stopPropagation();openStaff();}} style={{...Btn(C.navy),padding:"7px 11px"}}>表示・設定</button></td></tr>;
     })}</tbody></table></div>
     <div id="employment-staff-detail" style={{...GC,scrollMarginTop:18}}><h3 style={{margin:"0 0 14px"}}>{staff.name}さんの個別条件</h3><div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(210px,1fr))",gap:12}}>
       {[['contractStartDate','契約開始日','date'],['employmentType','雇用形態','text'],['currentHourlyRate','現在の時給','number'],['rateEffectiveDate','時給適用日','date'],['basicWorkHours','基本勤務時間','text'],['basicWorkplace','基本就業場所','text']].map(([key,label,type])=><label key={key} style={{fontSize:12,fontWeight:800}}>{label}<input type={type} value={form[key]??""} onChange={e=>setForm({...form,[key]:e.target.value})} style={{display:"block",width:"100%",border:`1px solid ${C.border}`,borderRadius:8,padding:"10px 11px",fontSize:14,marginTop:5}}/></label>)}
     </div><button onClick={saveProfile} style={{...Btn(C.navy),marginTop:14}}>個別条件を保存</button></div>
-    <div style={GC}><h3 style={{margin:"0 0 12px"}}>契約用本人アカウント</h3><div style={{fontSize:13,fontWeight:800,color:saved.authUid?C.green:C.red,marginBottom:12}}>登録状況：{saved.authUid?"登録済み":"未登録"}</div>{saved.authUid?<div style={{background:C.greenL,borderRadius:9,padding:"12px 14px",fontSize:13,lineHeight:1.7,fontWeight:700}}>本人アカウントは作成済みです。初回登録用の仮パスワード作成ボタンは、二重登録を防ぐため表示していません。本人は設定済みのパスワードでログインできます。</div>:<><p style={{fontSize:12,lineHeight:1.7,color:C.muted}}>スタッフへ渡す仮パスワードを作成します。本人は最初のログイン後、自分だけのパスワードへ変更します。メールアドレスの入力は不要です。</p>{accountMessage&&<div role="status" style={{background:accountMessage.includes("できません")?C.redL:C.blueL,borderRadius:8,padding:"10px 12px",fontSize:13,fontWeight:700,lineHeight:1.6,marginBottom:10}}>{accountMessage}</div>}<div style={{display:"flex",gap:8,flexWrap:"wrap",alignItems:"center"}}><input type={showTempPassword?"text":"password"} value={tempPassword} onChange={e=>setTempPassword(e.target.value)} disabled={accountBusy} placeholder="仮パスワード（6文字以上）" style={{width:"100%",maxWidth:420,border:`1px solid ${C.border}`,borderRadius:8,padding:10,fontSize:16}}/><button type="button" onClick={()=>setShowTempPassword(v=>!v)} style={{...Btn("#fff",C.navy),border:`1px solid ${C.border}`}}>{showTempPassword?"隠す":"表示"}</button></div><div style={{display:"flex",gap:8,flexWrap:"wrap",marginTop:10}}><button type="button" onClick={makeTempPassword} disabled={accountBusy} style={Btn(C.amber)}>仮パスワードを自動作成</button><button type="button" onClick={createAccount} disabled={accountBusy} style={Btn(accountBusy?C.muted:C.green)}>{accountBusy?"作成中…":"この仮パスワードでアカウントを作成"}</button></div></>}<details style={{marginTop:12}}><summary style={{cursor:"pointer",fontSize:12,color:C.muted}}>既存アカウントをUIDで紐付ける</summary><div style={{display:"flex",gap:8,marginTop:8,flexWrap:"wrap"}}><input value={linkUid} onChange={e=>setLinkUid(e.target.value)} placeholder="Firebase Authentication UID" style={{flex:1,minWidth:220,border:`1px solid ${C.border}`,borderRadius:8,padding:10}}/><button type="button" onClick={()=>linkAccess(linkUid)} style={Btn(C.navy)}>紐付ける</button></div></details></div>
+    <div style={GC}><h3 style={{margin:"0 0 12px"}}>契約用本人アカウント</h3><div style={{fontSize:13,fontWeight:800,color:selectedPasswordStatus==="変更済み"?C.green:selectedPasswordStatus==="仮パスワードのまま"?C.amber:C.red,marginBottom:12}}>登録状況：{saved.authUid?"登録済み":"未登録"}　／　パスワード：{selectedPasswordStatus}</div>{saved.authUid?<div style={{background:selectedPasswordStatus==="変更済み"?C.greenL:"#fff7ed",borderRadius:9,padding:"12px 14px",fontSize:13,lineHeight:1.7,fontWeight:700}}>本人アカウントは作成済みです。{selectedPasswordStatus==="仮パスワードのまま"?"まだ本人用パスワードへの変更が完了していません。":"本人用パスワードへの変更状況を上の表示で確認できます。"}</div>:<><p style={{fontSize:12,lineHeight:1.7,color:C.muted}}>スタッフへ渡す仮パスワードを作成します。本人は最初のログイン後、自分だけのパスワードへ変更します。メールアドレスの入力は不要です。</p>{accountMessage&&<div role="status" style={{background:accountMessage.includes("できません")?C.redL:C.blueL,borderRadius:8,padding:"10px 12px",fontSize:13,fontWeight:700,lineHeight:1.6,marginBottom:10}}>{accountMessage}</div>}<div style={{display:"flex",gap:8,flexWrap:"wrap",alignItems:"center"}}><input type={showTempPassword?"text":"password"} value={tempPassword} onChange={e=>setTempPassword(e.target.value)} disabled={accountBusy} placeholder="仮パスワード（6文字以上）" style={{width:"100%",maxWidth:420,border:`1px solid ${C.border}`,borderRadius:8,padding:10,fontSize:16}}/><button type="button" onClick={()=>setShowTempPassword(v=>!v)} style={{...Btn("#fff",C.navy),border:`1px solid ${C.border}`}}>{showTempPassword?"隠す":"表示"}</button></div><div style={{display:"flex",gap:8,flexWrap:"wrap",marginTop:10}}><button type="button" onClick={makeTempPassword} disabled={accountBusy} style={Btn(C.amber)}>仮パスワードを自動作成</button><button type="button" onClick={createAccount} disabled={accountBusy} style={Btn(accountBusy?C.muted:C.green)}>{accountBusy?"作成中…":"この仮パスワードでアカウントを作成"}</button></div></>}<details style={{marginTop:12}}><summary style={{cursor:"pointer",fontSize:12,color:C.muted}}>既存アカウントをUIDで紐付ける</summary><div style={{display:"flex",gap:8,marginTop:8,flexWrap:"wrap"}}><input value={linkUid} onChange={e=>setLinkUid(e.target.value)} placeholder="Firebase Authentication UID" style={{flex:1,minWidth:220,border:`1px solid ${C.border}`,borderRadius:8,padding:10}}/><button type="button" onClick={()=>linkAccess(linkUid)} style={Btn(C.navy)}>紐付ける</button></div></details></div>
     <div style={GC}><h3 style={{margin:"0 0 12px"}}>契約書・規程のプレビュー／正式発行</h3>{documents.filter(d=>d.activeVersionId).map(d=><label key={d.id} style={{display:"flex",gap:8,alignItems:"center",fontSize:13,padding:"7px 0"}}><input type="checkbox" checked={selectedDocs.includes(d.id)} onChange={e=>{setSelectedDocs(e.target.checked?[...selectedDocs,d.id]:selectedDocs.filter(id=>id!==d.id));setContractMessage("");setTemplatePreviewOpen(false);}}/>{d.title}（{data.versions?.[d.id]?.[d.activeVersionId]?.versionLabel||""}）</label>)}{!documents.some(d=>d.activeVersionId)&&<p style={{fontSize:13,color:C.muted}}>先に「文書・バージョン管理」で文書を公開してください。</p>}{contractMessage&&<div role="status" style={{background:contractMessage.includes("発行しました")?C.greenL:contractMessage.includes("発行しています")||contractMessage.includes("プレビューを表示")?C.blueL:C.redL,borderRadius:9,padding:"11px 13px",fontSize:13,fontWeight:800,lineHeight:1.7,marginTop:10}}>{contractMessage}</div>}<div style={{display:"flex",gap:10,flexWrap:"wrap",marginTop:10}}><button type="button" onClick={previewContract} style={Btn(C.navy)}>契約書をプレビュー</button><button type="button" onClick={issueContract} disabled={contractBusy} style={Btn(contractBusy?C.muted:C.amber)}>{contractBusy?"正式発行中…":"契約書を正式発行"}</button></div><p style={{fontSize:12,lineHeight:1.7,color:C.muted,margin:"9px 0 0"}}>個別条件が未入力でも正式発行できます。空欄は契約書に「未設定」と表示されます。</p>{templatePreviewOpen&&templatePreviewSnapshot&&<div id="employment-template-preview" style={{borderTop:`2px solid ${C.navy}`,marginTop:16,paddingTop:14,scrollMarginTop:18}}><div style={{display:"flex",justifyContent:"space-between",gap:10,alignItems:"center",flexWrap:"wrap",marginBottom:10}}><div style={{fontSize:13,fontWeight:900,color:C.navy}}>発行前プレビュー（保存されません）</div><button type="button" onClick={()=>setTemplatePreviewOpen(false)} style={{...Btn("#fff",C.navy),border:`1px solid ${C.border}`}}>プレビューを閉じる</button></div><EmploymentDocumentBody snapshot={templatePreviewSnapshot} agreement={null}/></div>}{latestIssue&&<div style={{marginTop:16,borderTop:`1px solid ${C.border}`,paddingTop:12}}><div style={{fontSize:12,color:latestAgreement?C.green:C.red,fontWeight:700}}>最新の発行済み契約：{latestIssue.contractVersion} ／ {latestAgreement?`同意済み ${employmentFormatDateTime(latestAgreement.agreedAt)}`:"未同意"}</div><button type="button" onClick={()=>setPreviewOpen(v=>!v)} style={{...Btn(C.navy),marginTop:10}}>{previewOpen?"発行済み契約書を閉じる":"発行済み契約書を表示"}</button>{previewOpen&&<div style={{borderTop:`1px solid ${C.border}`,marginTop:14,paddingTop:14}}><EmploymentDocumentBody snapshot={employmentParseSnapshot(latestIssue.snapshotJson)} agreement={latestAgreement}/></div>}</div>}</div>
     <div style={GC}><h3 style={{margin:"0 0 10px"}}>時給変更履歴</h3>{history.length?history.map(h=><div key={h.id} style={{borderBottom:`1px solid ${C.border}`,padding:"8px 0",fontSize:13}}>{h.effectiveDate}　{employmentMoney(h.previousRate)} → <b>{employmentMoney(h.newRate)}</b></div>):<div style={{fontSize:13,color:C.muted}}>変更履歴はありません。</div>}</div>
   </div>;
