@@ -1715,6 +1715,50 @@ const employmentReplaceTemplateTokens=(body,values={})=>Object.entries(values).r
   if(value===undefined||value===null||value==="")return text;
   return text.split(`【${key}】`).join(String(value));
 },String(body||""));
+const EMPLOYMENT_REQUIRED_FIELDS=[
+  ["employmentStartDate","雇用開始年月日","date"],
+  ["contractStartDate","今回の契約開始日","date"],
+  ["employmentType","雇用形態","text"],
+  ["currentHourlyRate","現在の時給","number"],
+  ["basicWorkHours","基本勤務時間","text"],
+  ["basicWorkplace","基本就業場所","text"],
+  ["raisePolicy","昇給の有無","choice"],
+  ["bonusPolicy","賞与の有無","choice"],
+  ["retirementPolicy","退職手当の有無","choice"],
+  ["consultationContact","相談窓口（担当・連絡先）","text"],
+  ["explanationContact","待遇の説明の申出先","text"],
+  ["representativeName","代表者氏名","text"]
+];
+const employmentValidDate=value=>{
+  const s=String(value||"");
+  if(!/^\d{4}-\d{2}-\d{2}$/.test(s))return false;
+  const d=new Date(s+"T00:00:00Z");
+  return !Number.isNaN(d.getTime())&&d.toISOString().slice(0,10)===s;
+};
+const employmentMissingFields=profile=>{
+  const missing=EMPLOYMENT_REQUIRED_FIELDS.filter(([key,label,type])=>{
+    const value=String(profile[key]??"").trim();
+    if(type==="date")return !employmentValidDate(value);
+    if(type==="choice")return !["有","無"].includes(value);
+    if(type==="number")return !Number.isFinite(Number(value))||Number(value)<=0;
+    return !value||value==="未設定"||value==="要確認";
+  }).map(([,label])=>label);
+  if(employmentValidDate(profile.employmentStartDate)&&employmentValidDate(profile.contractStartDate)&&profile.employmentStartDate>profile.contractStartDate)missing.push("雇用開始日が今回の契約開始日より後になっています");
+  return missing;
+};
+const employmentNoticeTokens=p=>({
+  雇用開始年月日:p.employmentStartDate||"未設定",
+  昇給の有無:p.raisePolicy||"未設定",賞与の有無:p.bonusPolicy||"未設定",
+  退職手当の有無:p.retirementPolicy||"未設定",
+  相談窓口:p.consultationContact||"未設定",待遇説明申出先:p.explanationContact||"未設定",
+  代表者氏名:p.representativeName||"未設定"
+});
+const employmentNoticeBody=(doc,p,tokens)=>{
+  const body=employmentReplaceTemplateTokens(doc.body,tokens);
+  if(doc.type!=="労働契約書兼労働条件通知書")return body;
+  const n=employmentNoticeTokens(p);
+  return body+"\n\n【個別労働条件・待遇に関する明示事項】\n雇用開始年月日："+n.雇用開始年月日+"\n今回の契約開始日："+(p.contractStartDate||"未設定")+"\n昇給："+n.昇給の有無+"\n賞与："+n.賞与の有無+"\n退職手当："+n.退職手当の有無+"\n相談窓口："+n.相談窓口+"\n通常の労働者との待遇の相違の内容・理由等について、会社に説明を求めることができます。申出先："+n.待遇説明申出先+"\n説明を求めたことを理由とする不利益な取扱いは行いません。";
+};
 const employmentServiceRuleVersion=documents=>ensureArray(documents)
   .find(doc=>doc.type==="コンシェルジュ服務規程")?.versionLabel||"未登録";
 const employmentAccessFor=async user=>user?(await firebase.database().ref(`/access/${user.uid}`).get()).val():null;
@@ -1967,7 +2011,7 @@ function EmploymentStaffManager({cfg,directory,data,selectedStaffId,setSelectedS
   const staff=directory.find(s=>s.staffId===selectedStaffId)||directory[0];
   const saved=data.profiles?.[staff?.staffId]||{};
   const fallbackRate=cfg.staffRates?.[staff?.name]||0;
-  const blankProfile={staffId:staff?.staffId||"",name:staff?.name||"",role:staff?.role||"",employmentType:"パートタイマー",contractStartDate:"",currentHourlyRate:fallbackRate,basicWorkHours:"",basicWorkplace:"",authUid:"",email:""};
+  const blankProfile={staffId:staff?.staffId||"",name:staff?.name||"",role:staff?.role||"",employmentType:"パートタイマー",employmentStartDate:"",contractStartDate:"",currentHourlyRate:fallbackRate,basicWorkHours:"",basicWorkplace:"",raisePolicy:"",bonusPolicy:"",retirementPolicy:"",consultationContact:"",explanationContact:"",representativeName:"",authUid:"",email:""};
   const [form,setForm]=useState({...blankProfile,...saved});
   const [tempPassword,setTempPassword]=useState("");
   const [showTempPassword,setShowTempPassword]=useState(false);
@@ -2031,8 +2075,9 @@ function EmploymentStaffManager({cfg,directory,data,selectedStaffId,setSelectedS
     const contractVersion=sourceDocuments.map(d=>`${d.title} ${d.versionLabel}`).join(" / ");
     const rate=Number(profile.currentHourlyRate||0);
     const tokenValues={従業員氏名:unset(staff.name),契約開始日:unset(profile.contractStartDate),雇用形態:unset(profile.employmentType),基本時給:rate>0?rate.toLocaleString("ja-JP"):"未設定",基本勤務時間:unset(profile.basicWorkHours),基本就業場所:unset(profile.basicWorkplace),契約バージョン:unset(contractVersion),代表者氏名:"未設定",電子同意日時:"未設定"};
-    const chosen=sourceDocuments.map(doc=>({...doc,body:employmentReplaceTemplateTokens(doc.body,tokenValues)}));
-    setTemplatePreviewSnapshot({companyName:"合同会社 atmark saki",staffId:staff.staffId,staffName:staff.name,contractVersion,serviceRuleVersion:employmentServiceRuleVersion(chosen),conditions:{contractStartDate:unset(profile.contractStartDate),employmentType:unset(profile.employmentType),currentHourlyRate:rate>0?rate:"未設定",basicWorkHours:unset(profile.basicWorkHours),basicWorkplace:unset(profile.basicWorkplace)},documents:chosen,preview:true});
+    Object.assign(tokenValues,employmentNoticeTokens(profile));
+    const chosen=sourceDocuments.map(doc=>({...doc,body:employmentNoticeBody(doc,profile,tokenValues)}));
+    setTemplatePreviewSnapshot({companyName:"合同会社 atmark saki",staffId:staff.staffId,staffName:staff.name,contractVersion,serviceRuleVersion:employmentServiceRuleVersion(chosen),conditions:{contractStartDate:unset(profile.contractStartDate),employmentStartDate:unset(profile.employmentStartDate),employmentType:unset(profile.employmentType),currentHourlyRate:rate>0?rate:"未設定",basicWorkHours:unset(profile.basicWorkHours),basicWorkplace:unset(profile.basicWorkplace),raisePolicy:unset(profile.raisePolicy),bonusPolicy:unset(profile.bonusPolicy),retirementPolicy:unset(profile.retirementPolicy),consultationContact:unset(profile.consultationContact),explanationContact:unset(profile.explanationContact),representativeName:unset(profile.representativeName)},documents:chosen,preview:true});
     setTemplatePreviewOpen(true);setContractMessage("契約書のプレビューを表示しました。この操作では契約は発行・保存されません。");
     setTimeout(()=>document.getElementById("employment-template-preview")?.scrollIntoView({behavior:"smooth",block:"start"}),0);
   };
@@ -2040,14 +2085,20 @@ function EmploymentStaffManager({cfg,directory,data,selectedStaffId,setSelectedS
     const profile={...blankProfile,...saved,...form,staffId:staff.staffId,name:staff.name,role:staff.role};
     const sourceDocuments=selectedSourceDocuments();
     if(!sourceDocuments.length){setContractMessage("まだ発行できません。発行する公開済み文書にチェックを入れてください。");return;}
+    if(sourceDocuments.some(d=>d.type==="労働契約書兼労働条件通知書")){
+      const missing=employmentMissingFields(profile);
+      if(missing.length){setContractMessage("まだ発行できません。入力内容を確認してください： "+missing.join("、"));return;}
+      if(!confirm("契約本文と個別労働条件を確認しましたか？正式発行後は発行時の内容が履歴に残ります。"))return;
+    }
     const id=employmentMakeId("issue"),now=Date.now();
     const contractVersion=sourceDocuments.map(d=>`${d.title} ${d.versionLabel}`).join(" / ");
     const unset=value=>String(value??"").trim()||"未設定";
     const rate=Number(profile.currentHourlyRate||0);
     const tokenValues={従業員氏名:staff.name,契約開始日:unset(profile.contractStartDate),雇用形態:unset(profile.employmentType),基本時給:rate>0?rate.toLocaleString("ja-JP"):"未設定",基本勤務時間:unset(profile.basicWorkHours),基本就業場所:unset(profile.basicWorkplace),契約バージョン:contractVersion,代表者氏名:"未設定",電子同意日時:"未設定"};
-    const chosen=sourceDocuments.map(doc=>({...doc,body:employmentReplaceTemplateTokens(doc.body,tokenValues)}));
+    Object.assign(tokenValues,employmentNoticeTokens(profile));
+    const chosen=sourceDocuments.map(doc=>({...doc,body:employmentNoticeBody(doc,profile,tokenValues)}));
     const serviceRuleVersion=employmentServiceRuleVersion(chosen);
-    const snapshot={companyName:"合同会社 atmark saki",staffId:staff.staffId,staffName:staff.name,contractVersion,serviceRuleVersion,conditions:{contractStartDate:unset(profile.contractStartDate),employmentType:unset(profile.employmentType),currentHourlyRate:rate>0?rate:"未設定",basicWorkHours:unset(profile.basicWorkHours),basicWorkplace:unset(profile.basicWorkplace)},documents:chosen,issuedAt:now};
+    const snapshot={companyName:"合同会社 atmark saki",staffId:staff.staffId,staffName:staff.name,contractVersion,serviceRuleVersion,conditions:{contractStartDate:unset(profile.contractStartDate),employmentStartDate:unset(profile.employmentStartDate),employmentType:unset(profile.employmentType),currentHourlyRate:rate>0?rate:"未設定",basicWorkHours:unset(profile.basicWorkHours),basicWorkplace:unset(profile.basicWorkplace),raisePolicy:unset(profile.raisePolicy),bonusPolicy:unset(profile.bonusPolicy),retirementPolicy:unset(profile.retirementPolicy),consultationContact:unset(profile.consultationContact),explanationContact:unset(profile.explanationContact),representativeName:unset(profile.representativeName)},documents:chosen,issuedAt:now};
     const issue={id,contractId:chosen.find(d=>d.type==="労働契約書兼労働条件通知書")?.documentId||id,title:"雇用契約・社内文書",staffId:staff.staffId,staffName:staff.name,contractVersion,serviceRuleVersion,hourlyRate:rate>0?rate:"未設定",contractStartDate:unset(profile.contractStartDate),documentRefs:chosen.map(({documentId,versionId,title,versionLabel,type})=>({documentId,versionId,title,versionLabel,type})),snapshotJson:JSON.stringify(snapshot),issuedAt:now,issuedByUid:firebase.auth().currentUser?.uid||""};
     setContractBusy(true);setContractMessage("契約書を発行しています…");
     try{await employmentRef(`issues/${staff.staffId}/${id}`).set(issue);setContractMessage(`${staff.name}さんへ新しい契約文書を発行しました。`);setMessage(`${staff.name}さんへ新しい契約文書を発行しました。`);await reload();}catch(e){console.error(e);setContractMessage("契約文書を発行できませんでした。通信状態を確認して、もう一度お試しください。");}finally{setContractBusy(false);}
@@ -2060,10 +2111,14 @@ function EmploymentStaffManager({cfg,directory,data,selectedStaffId,setSelectedS
       return <tr key={s.staffId} onClick={openStaff} style={{cursor:"pointer",background:s.staffId===staff.staffId?C.blueL:(!agreement&&issue?C.redL:"transparent")}}><td style={{...TD,fontWeight:700}}>{s.name}</td><td style={{...TD,color:agreement?C.green:issue?C.red:C.muted,fontWeight:800}}>{agreement?"同意済み":issue?"未同意":"未発行"}</td><td style={TD}>{employmentMoney(p.currentHourlyRate??cfg.staffRates?.[s.name])}</td><td style={TD}>{p.contractStartDate||"—"}</td><td style={TD}>{issue?.contractVersion||"—"}</td><td style={TD}>{agreement?employmentFormatDateTime(agreement.agreedAt):"—"}</td><td style={TD}><button type="button" onClick={e=>{e.stopPropagation();openStaff();}} style={{...Btn(C.navy),padding:"7px 11px"}}>表示・設定</button></td></tr>;
     })}</tbody></table></div>
     <div id="employment-staff-detail" style={{...GC,scrollMarginTop:18}}><h3 style={{margin:"0 0 14px"}}>{staff.name}さんの個別条件</h3><div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(210px,1fr))",gap:12}}>
-      {[['contractStartDate','契約開始日','date'],['employmentType','雇用形態','text'],['currentHourlyRate','現在の時給','number'],['rateEffectiveDate','時給適用日','date'],['basicWorkHours','基本勤務時間','text'],['basicWorkplace','基本就業場所','text']].map(([key,label,type])=><label key={key} style={{fontSize:12,fontWeight:800}}>{label}<input type={type} value={form[key]??""} onChange={e=>setForm({...form,[key]:e.target.value})} style={{display:"block",width:"100%",border:`1px solid ${C.border}`,borderRadius:8,padding:"10px 11px",fontSize:14,marginTop:5}}/></label>)}
+      {[...EMPLOYMENT_REQUIRED_FIELDS,['rateEffectiveDate','時給適用日','date']].map(([key,label,type])=>{
+      const style={display:"block",width:"100%",border:`1px solid ${C.border}`,borderRadius:8,padding:"10px 11px",fontSize:14,marginTop:5};
+      const onChange=e=>setForm({...form,[key]:e.target.value});
+      return <label key={key} style={{fontSize:12,fontWeight:800}}>{label}{key!=="rateEffectiveDate"&&<span style={{color:C.red}}> ＊</span>}{type==="choice"?<select value={form[key]??""} onChange={onChange} style={style}><option value="">選択してください</option><option value="有">有</option><option value="無">無</option></select>:<input type={type} value={form[key]??""} onChange={onChange} style={style}/>}</label>;
+    })}
     </div><button onClick={saveProfile} style={{...Btn(C.navy),marginTop:14}}>個別条件を保存</button></div>
     <div style={GC}><h3 style={{margin:"0 0 12px"}}>契約用本人アカウント</h3><div style={{fontSize:13,fontWeight:800,color:saved.authUid?C.green:C.red,marginBottom:12}}>登録状況：{saved.authUid?"登録済み":"未登録"}</div>{saved.authUid?<div style={{background:C.greenL,borderRadius:9,padding:"12px 14px",fontSize:13,lineHeight:1.7,fontWeight:700}}>本人アカウントは作成済みです。初回登録用の仮パスワード作成ボタンは、二重登録を防ぐため表示していません。本人は設定済みのパスワードでログインできます。</div>:<><p style={{fontSize:12,lineHeight:1.7,color:C.muted}}>スタッフへ渡す仮パスワードを作成します。本人は最初のログイン後、自分だけのパスワードへ変更します。メールアドレスの入力は不要です。</p>{accountMessage&&<div role="status" style={{background:accountMessage.includes("できません")?C.redL:C.blueL,borderRadius:8,padding:"10px 12px",fontSize:13,fontWeight:700,lineHeight:1.6,marginBottom:10}}>{accountMessage}</div>}<div style={{display:"flex",gap:8,flexWrap:"wrap",alignItems:"center"}}><input type={showTempPassword?"text":"password"} value={tempPassword} onChange={e=>setTempPassword(e.target.value)} disabled={accountBusy} placeholder="仮パスワード（6文字以上）" style={{width:"100%",maxWidth:420,border:`1px solid ${C.border}`,borderRadius:8,padding:10,fontSize:16}}/><button type="button" onClick={()=>setShowTempPassword(v=>!v)} style={{...Btn("#fff",C.navy),border:`1px solid ${C.border}`}}>{showTempPassword?"隠す":"表示"}</button></div><div style={{display:"flex",gap:8,flexWrap:"wrap",marginTop:10}}><button type="button" onClick={makeTempPassword} disabled={accountBusy} style={Btn(C.amber)}>仮パスワードを自動作成</button><button type="button" onClick={createAccount} disabled={accountBusy} style={Btn(accountBusy?C.muted:C.green)}>{accountBusy?"作成中…":"この仮パスワードでアカウントを作成"}</button></div></>}<details style={{marginTop:12}}><summary style={{cursor:"pointer",fontSize:12,color:C.muted}}>既存アカウントをUIDで紐付ける</summary><div style={{display:"flex",gap:8,marginTop:8,flexWrap:"wrap"}}><input value={linkUid} onChange={e=>setLinkUid(e.target.value)} placeholder="Firebase Authentication UID" style={{flex:1,minWidth:220,border:`1px solid ${C.border}`,borderRadius:8,padding:10}}/><button type="button" onClick={()=>linkAccess(linkUid)} style={Btn(C.navy)}>紐付ける</button></div></details></div>
-    <div style={GC}><h3 style={{margin:"0 0 12px"}}>契約書・規程のプレビュー／正式発行</h3>{documents.filter(d=>d.activeVersionId).map(d=><label key={d.id} style={{display:"flex",gap:8,alignItems:"center",fontSize:13,padding:"7px 0"}}><input type="checkbox" checked={selectedDocs.includes(d.id)} onChange={e=>{setSelectedDocs(e.target.checked?[...selectedDocs,d.id]:selectedDocs.filter(id=>id!==d.id));setContractMessage("");setTemplatePreviewOpen(false);}}/>{d.title}（{data.versions?.[d.id]?.[d.activeVersionId]?.versionLabel||""}）</label>)}{!documents.some(d=>d.activeVersionId)&&<p style={{fontSize:13,color:C.muted}}>先に「文書・バージョン管理」で文書を公開してください。</p>}{contractMessage&&<div role="status" style={{background:contractMessage.includes("発行しました")?C.greenL:contractMessage.includes("発行しています")||contractMessage.includes("プレビューを表示")?C.blueL:C.redL,borderRadius:9,padding:"11px 13px",fontSize:13,fontWeight:800,lineHeight:1.7,marginTop:10}}>{contractMessage}</div>}<div style={{display:"flex",gap:10,flexWrap:"wrap",marginTop:10}}><button type="button" onClick={previewContract} style={Btn(C.navy)}>契約書をプレビュー</button><button type="button" onClick={issueContract} disabled={contractBusy} style={Btn(contractBusy?C.muted:C.amber)}>{contractBusy?"正式発行中…":"契約書を正式発行"}</button></div><p style={{fontSize:12,lineHeight:1.7,color:C.muted,margin:"9px 0 0"}}>個別条件が未入力でも正式発行できます。空欄は契約書に「未設定」と表示されます。</p>{templatePreviewOpen&&templatePreviewSnapshot&&<div id="employment-template-preview" style={{borderTop:`2px solid ${C.navy}`,marginTop:16,paddingTop:14,scrollMarginTop:18}}><div style={{display:"flex",justifyContent:"space-between",gap:10,alignItems:"center",flexWrap:"wrap",marginBottom:10}}><div style={{fontSize:13,fontWeight:900,color:C.navy}}>発行前プレビュー（保存されません）</div><button type="button" onClick={()=>setTemplatePreviewOpen(false)} style={{...Btn("#fff",C.navy),border:`1px solid ${C.border}`}}>プレビューを閉じる</button></div><EmploymentDocumentBody snapshot={templatePreviewSnapshot} agreement={null}/></div>}{latestIssue&&<div style={{marginTop:16,borderTop:`1px solid ${C.border}`,paddingTop:12}}><div style={{fontSize:12,color:latestAgreement?C.green:C.red,fontWeight:700}}>最新の発行済み契約：{latestIssue.contractVersion} ／ {latestAgreement?`同意済み ${employmentFormatDateTime(latestAgreement.agreedAt)}`:"未同意"}</div><button type="button" onClick={()=>setPreviewOpen(v=>!v)} style={{...Btn(C.navy),marginTop:10}}>{previewOpen?"発行済み契約書を閉じる":"発行済み契約書を表示"}</button>{previewOpen&&<div style={{borderTop:`1px solid ${C.border}`,marginTop:14,paddingTop:14}}><EmploymentDocumentBody snapshot={employmentParseSnapshot(latestIssue.snapshotJson)} agreement={latestAgreement}/></div>}</div>}</div>
+    <div style={GC}><h3 style={{margin:"0 0 12px"}}>契約書・規程のプレビュー／正式発行</h3>{documents.filter(d=>d.activeVersionId).map(d=><label key={d.id} style={{display:"flex",gap:8,alignItems:"center",fontSize:13,padding:"7px 0"}}><input type="checkbox" checked={selectedDocs.includes(d.id)} onChange={e=>{setSelectedDocs(e.target.checked?[...selectedDocs,d.id]:selectedDocs.filter(id=>id!==d.id));setContractMessage("");setTemplatePreviewOpen(false);}}/>{d.title}（{data.versions?.[d.id]?.[d.activeVersionId]?.versionLabel||""}）</label>)}{!documents.some(d=>d.activeVersionId)&&<p style={{fontSize:13,color:C.muted}}>先に「文書・バージョン管理」で文書を公開してください。</p>}{contractMessage&&<div role="status" style={{background:contractMessage.includes("発行しました")?C.greenL:contractMessage.includes("発行しています")||contractMessage.includes("プレビューを表示")?C.blueL:C.redL,borderRadius:9,padding:"11px 13px",fontSize:13,fontWeight:800,lineHeight:1.7,marginTop:10}}>{contractMessage}</div>}<div style={{display:"flex",gap:10,flexWrap:"wrap",marginTop:10}}><button type="button" onClick={previewContract} style={Btn(C.navy)}>契約書をプレビュー</button><button type="button" onClick={issueContract} disabled={contractBusy} style={Btn(contractBusy?C.muted:C.amber)}>{contractBusy?"正式発行中…":"契約書を正式発行"}</button></div><p style={{fontSize:12,lineHeight:1.7,color:C.muted,margin:"9px 0 0"}}>雇用契約書は必須の個別条件が未入力の場合、正式発行できません。下書き保存・プレビューは可能です。既存の雇用開始日は確認して入力し、契約更新時に上書きしないでください。</p>{templatePreviewOpen&&templatePreviewSnapshot&&<div id="employment-template-preview" style={{borderTop:`2px solid ${C.navy}`,marginTop:16,paddingTop:14,scrollMarginTop:18}}><div style={{display:"flex",justifyContent:"space-between",gap:10,alignItems:"center",flexWrap:"wrap",marginBottom:10}}><div style={{fontSize:13,fontWeight:900,color:C.navy}}>発行前プレビュー（保存されません）</div><button type="button" onClick={()=>setTemplatePreviewOpen(false)} style={{...Btn("#fff",C.navy),border:`1px solid ${C.border}`}}>プレビューを閉じる</button></div><EmploymentDocumentBody snapshot={templatePreviewSnapshot} agreement={null}/></div>}{latestIssue&&<div style={{marginTop:16,borderTop:`1px solid ${C.border}`,paddingTop:12}}><div style={{fontSize:12,color:latestAgreement?C.green:C.red,fontWeight:700}}>最新の発行済み契約：{latestIssue.contractVersion} ／ {latestAgreement?`同意済み ${employmentFormatDateTime(latestAgreement.agreedAt)}`:"未同意"}</div><button type="button" onClick={()=>setPreviewOpen(v=>!v)} style={{...Btn(C.navy),marginTop:10}}>{previewOpen?"発行済み契約書を閉じる":"発行済み契約書を表示"}</button>{previewOpen&&<div style={{borderTop:`1px solid ${C.border}`,marginTop:14,paddingTop:14}}><EmploymentDocumentBody snapshot={employmentParseSnapshot(latestIssue.snapshotJson)} agreement={latestAgreement}/></div>}</div>}</div>
     <div style={GC}><h3 style={{margin:"0 0 10px"}}>時給変更履歴</h3>{history.length?history.map(h=><div key={h.id} style={{borderBottom:`1px solid ${C.border}`,padding:"8px 0",fontSize:13}}>{h.effectiveDate}　{employmentMoney(h.previousRate)} → <b>{employmentMoney(h.newRate)}</b></div>):<div style={{fontSize:13,color:C.muted}}>変更履歴はありません。</div>}</div>
   </div>;
 }
